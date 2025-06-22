@@ -4,13 +4,29 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"shared/repository"
 	"shared/types"
+	"strconv"
+	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/yousuf64/shift"
 )
 
+var jobRepo *repository.JobRepository
+
 func main() {
+	dynamodb, err := repository.NewDynamoDBClient()
+	if err != nil {
+		log.Fatalf("Failed to create DynamoDB client %v", err)
+	}
+	repository.SeedTables(dynamodb)
+
+	jobRepo, err := repository.NewJobRepository()
+	if err != nil {
+		log.Fatalf("Failed to create job repo %v", err)
+	}
+
 	nc, err := nats.Connect(nats.DefaultURL)
 	if err != nil {
 		log.Fatalf("Failed to connect to NATS: %v", err)
@@ -24,12 +40,26 @@ func main() {
 			return err
 		}
 
-		data, err := json.Marshal(req)
+		jobId := strconv.Itoa(int(time.Now().UnixNano()))
+		jobRepo.CreateJob(&types.Job{
+			ID:          jobId,
+			URL:         req.Url,
+			Status:      types.JobStatusPending,
+			CreatedAt:   time.Time{},
+			UpdatedAt:   time.Time{},
+			StartedAt:   nil,
+			CompletedAt: nil,
+			Result:      nil,
+		})
+
+		msg, err := json.Marshal(types.AnalyzeMessage{
+			JobId: jobId,
+		})
 		if err != nil {
 			return err
 		}
 
-		err = nc.Publish("url.analyze", data)
+		err = nc.Publish("url.analyze", msg)
 		if err != nil {
 			return err
 		}
