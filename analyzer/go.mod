@@ -4,6 +4,7 @@ go 1.24
 
 require (
 	github.com/nats-io/nats.go v1.43.0
+	golang.org/x/net v0.41.0
 )
 
 require (
