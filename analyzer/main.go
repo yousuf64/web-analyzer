@@ -15,6 +15,7 @@ import (
 )
 
 var jobRepo *repository.JobRepository
+var taskRepo *repository.TaskRepository
 
 func main() {
 	dynamodb, err := repository.NewDynamoDBClient()
@@ -26,6 +27,11 @@ func main() {
 	jobRepo, err = repository.NewJobRepository()
 	if err != nil {
 		log.Fatalf("Failed to create jobRepository %v", err)
+	}
+
+	taskRepo, err = repository.NewTaskRepository()
+	if err != nil {
+		log.Fatalf("Failed to create taskRepository %v", err)
 	}
 
 	nc, err := nats.Connect(nats.DefaultURL)
@@ -83,7 +89,17 @@ func processMessage(am types.AnalyzeMessage) {
 		updateJobStatus(am.JobId, types.JobStatusFailed)
 	}
 
-	a := NewAnalyzer()
+	a := NewAnalyzer(func(taskType types.TaskType, status types.TaskStatus) {
+		err := taskRepo.UpdateTaskStatus(am.JobId, taskType, status)
+		if err != nil {
+			log.Printf("Update task status failed: %v", err)
+		}
+	}, func(taskType types.TaskType, key string, status types.TaskStatus) {
+		err := taskRepo.UpdateSubTaskStatusByKey(am.JobId, taskType, key, status)
+		if err != nil {
+			log.Printf("Update subtask status failed: %v", err)
+		}
+	})
 	res, err := a.AnalyzeHTML(string(b))
 	if err != nil {
 		log.Fatalf("Failed to analyze HTML %v", err)

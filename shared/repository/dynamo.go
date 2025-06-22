@@ -120,17 +120,21 @@ func createTasksTableIfNotExists(client *dynamodb.DynamoDB, tableName string) er
 		TableName: aws.String(tableName),
 		KeySchema: []*dynamodb.KeySchemaElement{
 			{
-				AttributeName: aws.String("id"),
+				AttributeName: aws.String("job_id"),
 				KeyType:       aws.String("HASH"),
+			},
+			{
+				AttributeName: aws.String("type"),
+				KeyType:       aws.String("RANGE"),
 			},
 		},
 		AttributeDefinitions: []*dynamodb.AttributeDefinition{
 			{
-				AttributeName: aws.String("id"),
+				AttributeName: aws.String("job_id"),
 				AttributeType: aws.String("S"),
 			},
 			{
-				AttributeName: aws.String("job_id"),
+				AttributeName: aws.String("type"),
 				AttributeType: aws.String("S"),
 			},
 			{
@@ -144,22 +148,6 @@ func createTasksTableIfNotExists(client *dynamodb.DynamoDB, tableName string) er
 		},
 		BillingMode: aws.String("PAY_PER_REQUEST"),
 		GlobalSecondaryIndexes: []*dynamodb.GlobalSecondaryIndex{
-			{
-				IndexName: aws.String("job_id-created_at-index"),
-				KeySchema: []*dynamodb.KeySchemaElement{
-					{
-						AttributeName: aws.String("job_id"),
-						KeyType:       aws.String("HASH"),
-					},
-					{
-						AttributeName: aws.String("created_at"),
-						KeyType:       aws.String("RANGE"),
-					},
-				},
-				Projection: &dynamodb.Projection{
-					ProjectionType: aws.String("ALL"),
-				},
-			},
 			{
 				IndexName: aws.String("status-created_at-index"),
 				KeySchema: []*dynamodb.KeySchemaElement{

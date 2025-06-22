@@ -137,6 +137,9 @@ func (j *JobRepository) UpdateJob(id string, status *types.JobStatus, result *ty
 	if len(expressionAttributeNames) > 0 {
 		input.ExpressionAttributeNames = expressionAttributeNames
 	}
+	if len(expressionAttributeValues) > 0 {
+		input.ExpressionAttributeValues = expressionAttributeValues
+	}
 
 	_, err := j.dynamodb.UpdateItem(input)
 	return err

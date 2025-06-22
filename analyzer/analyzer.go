@@ -9,27 +9,38 @@ import (
 )
 
 type Analyzer struct {
-	htmlVersion  string
-	title        string
-	headings     map[string]int
-	links        []string
-	hasLoginForm bool
+	htmlVersion           string
+	title                 string
+	headings              map[string]int
+	links                 []string
+	hasLoginForm          bool
+	onTaskStatusUpdate    func(taskType types.TaskType, status types.TaskStatus)
+	onSubTaskStatusUpdate func(taskType types.TaskType, key string, status types.TaskStatus)
 }
 
-func NewAnalyzer() *Analyzer {
-	return &Analyzer{}
+func NewAnalyzer(
+	onTaskStatusUpdate func(taskType types.TaskType, status types.TaskStatus),
+	onSubTaskStatusUpdate func(taskType types.TaskType, key string, status types.TaskStatus)) *Analyzer {
+	return &Analyzer{onTaskStatusUpdate: onTaskStatusUpdate, onSubTaskStatusUpdate: onSubTaskStatusUpdate}
 }
 
 func (a *Analyzer) AnalyzeHTML(content string) (types.AnalyzeResult, error) {
+	a.onTaskStatusUpdate(types.TaskTypeExtracting, types.TaskStatusPending)
 	doc, err := html.Parse(strings.NewReader(content))
 	if err != nil {
 		log.Printf("Failed to parse HTML: %v", err)
+		a.onTaskStatusUpdate(types.TaskTypeExtracting, types.TaskStatusFailed)
 		return types.AnalyzeResult{}, err
 	}
+	a.onTaskStatusUpdate(types.TaskTypeExtracting, types.TaskStatusCompleted)
 
+	a.onTaskStatusUpdate(types.TaskTypeIdentifyingVersion, types.TaskStatusRunning)
 	a.htmlVersion = a.detectHtmlVersion(content)
+	a.onTaskStatusUpdate(types.TaskTypeIdentifyingVersion, types.TaskStatusCompleted)
 
+	a.onTaskStatusUpdate(types.TaskTypeAnalyzing, types.TaskStatusRunning)
 	a.dfs(doc)
+	a.onTaskStatusUpdate(types.TaskTypeAnalyzing, types.TaskStatusCompleted)
 
 	return types.AnalyzeResult{
 		HtmlVersion:  a.htmlVersion,

@@ -14,6 +14,7 @@ import (
 )
 
 var jobRepo *repository.JobRepository
+var taskRepo *repository.TaskRepository
 
 func main() {
 	dynamodb, err := repository.NewDynamoDBClient()
@@ -25,6 +26,11 @@ func main() {
 	jobRepo, err := repository.NewJobRepository()
 	if err != nil {
 		log.Fatalf("Failed to create job repo %v", err)
+	}
+
+	taskRepo, err := repository.NewTaskRepository()
+	if err != nil {
+		log.Fatalf("Failed to create task repo %v", err)
 	}
 
 	nc, err := nats.Connect(nats.DefaultURL)
@@ -51,6 +57,27 @@ func main() {
 			CompletedAt: nil,
 			Result:      nil,
 		})
+
+		err = taskRepo.CreateTasks(&types.Task{
+			JobID:  jobId,
+			Type:   types.TaskTypeExtracting,
+			Status: types.TaskStatusPending,
+		}, &types.Task{
+			JobID:  jobId,
+			Type:   types.TaskTypeIdentifyingVersion,
+			Status: types.TaskStatusPending,
+		}, &types.Task{
+			JobID:  jobId,
+			Type:   types.TaskTypeAnalyzing,
+			Status: types.TaskStatusPending,
+		}, &types.Task{
+			JobID:  jobId,
+			Type:   types.TaskTypeVerifyingLinks,
+			Status: types.TaskStatusPending,
+		})
+		if err != nil {
+			return err
+		}
 
 		msg, err := json.Marshal(types.AnalyzeMessage{
 			JobId: jobId,
