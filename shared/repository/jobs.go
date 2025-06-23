@@ -69,6 +69,29 @@ func (j *JobRepository) GetJob(id string) (*types.Job, error) {
 	return &job, nil
 }
 
+func (j *JobRepository) GetAllJobs() ([]*types.Job, error) {
+	input := &dynamodb.ScanInput{
+		TableName: aws.String(JobsTableName),
+	}
+
+	result, err := j.dynamodb.Scan(input)
+	if err != nil {
+		return nil, err
+	}
+
+	var jobs []*types.Job
+	for _, item := range result.Items {
+		var job types.Job
+		err = dynamodbattribute.UnmarshalMap(item, &job)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, &job)
+	}
+
+	return jobs, nil
+}
+
 func (j *JobRepository) UpdateJobStatus(id string, status types.JobStatus) error {
 	input := &dynamodb.UpdateItemInput{
 		TableName: aws.String(JobsTableName),
@@ -119,6 +142,11 @@ func (j *JobRepository) UpdateJob(id string, status *types.JobStatus, result *ty
 		resultAttr, err := dynamodbattribute.Marshal(result)
 		if err != nil {
 			return err
+		}
+		if len(result.Headings) == 0 {
+			resultAttr.M["headings"] = &dynamodb.AttributeValue{
+				M: make(map[string]*dynamodb.AttributeValue),
+			}
 		}
 		expressionAttributeValues[":result"] = resultAttr
 	}

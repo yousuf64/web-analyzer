@@ -16,6 +16,17 @@ import (
 var jobRepo *repository.JobRepository
 var taskRepo *repository.TaskRepository
 
+func corsMiddleware(next shift.HandlerFunc) shift.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request, route shift.Route) error {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+		
+		return next(w, r, route)
+	}
+}
+
 func main() {
 	dynamodb, err := repository.NewDynamoDBClient()
 	if err != nil {
@@ -40,6 +51,14 @@ func main() {
 	defer nc.Close()
 
 	router := shift.New()
+	router.Use(corsMiddleware)
+
+	// Register OPTIONS handler for all routes, so that CORS is handled by the middleware
+	router.OPTIONS("/*wildcard", func(w http.ResponseWriter, r *http.Request, route shift.Route) error {
+		w.WriteHeader(http.StatusOK)
+		return nil
+	})
+
 	router.POST("/analyze", func(w http.ResponseWriter, r *http.Request, route shift.Route) error {
 		var req types.AnalyzeRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -94,6 +113,17 @@ func main() {
 
 		w.WriteHeader(http.StatusAccepted)
 		return nil
+	})
+
+	router.GET("/jobs", func(w http.ResponseWriter, r *http.Request, route shift.Route) error {
+		jobs, err := jobRepo.GetAllJobs()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return err
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		return json.NewEncoder(w).Encode(jobs)
 	})
 
 	log.Printf("API server listening on :8080")
