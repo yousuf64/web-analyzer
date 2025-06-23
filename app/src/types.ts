@@ -25,4 +25,32 @@ export interface AnalyzeRequest {
 
 export interface AnalyzeResponse {
   job_id: string;
-} 
+}
+
+export interface Task {
+  job_id: string;
+  type: TaskType;
+  status: TaskStatus;
+  subtasks: Record<string, SubTask>;
+}
+
+export type TaskType = 
+  | 'extracting' 
+  | 'identifying_version' 
+  | 'analyzing' 
+  | 'verifying_links';
+
+export type TaskStatus = 
+  | 'pending' 
+  | 'running' 
+  | 'completed' 
+  | 'failed' 
+  | 'skipped';
+
+export interface SubTask {
+  type: SubTaskType;
+  status: TaskStatus;
+  url?: string;
+}
+
+export type SubTaskType = 'validating_link'; 

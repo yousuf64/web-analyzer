@@ -1,4 +1,5 @@
 import type { Job } from '../types';
+import { TaskCard } from './TaskCard';
 
 interface JobCardProps {
   job: Job;
@@ -57,6 +58,10 @@ export function JobCard({ job }: JobCardProps) {
           </div>
         </div>
       )}
+      
+      <div className="mt-4">
+        <TaskCard jobId={job.id} />
+      </div>
     </div>
   );
 } 

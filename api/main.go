@@ -22,7 +22,7 @@ func corsMiddleware(next shift.HandlerFunc) shift.HandlerFunc {
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Access-Control-Max-Age", "86400")
-		
+
 		return next(w, r, route)
 	}
 }
@@ -124,6 +124,23 @@ func main() {
 
 		w.Header().Set("Content-Type", "application/json")
 		return json.NewEncoder(w).Encode(jobs)
+	})
+
+	router.GET("/jobs/:job_id/tasks", func(w http.ResponseWriter, r *http.Request, route shift.Route) error {
+		jobId := route.Params.Get("job_id")
+		if jobId == "" {
+			http.Error(w, "Job ID is required", http.StatusBadRequest)
+			return nil
+		}
+
+		tasks, err := taskRepo.GetTasksByJobId(jobId)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return err
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		return json.NewEncoder(w).Encode(tasks)
 	})
 
 	log.Printf("API server listening on :8080")
