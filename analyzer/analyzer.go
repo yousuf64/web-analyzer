@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
 	"log"
+	"net/http"
+	"net/url"
 	"shared/types"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"golang.org/x/net/html"
 )
@@ -140,10 +145,76 @@ func (a *Analyzer) dfsFormInputs(n *html.Node, hasPassword, hasEmail *bool) {
 func (a *Analyzer) verifyLinks() {
 	log.Printf("Starting link verification for %d links", len(a.links))
 
+	if len(a.links) == 0 {
+		return
+	}
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	var wg sync.WaitGroup
+
+	maxConcurrency := 10
+	semaphore := make(chan struct{}, maxConcurrency)
+
 	for i, link := range a.links {
 		key := strconv.Itoa(i + 1)
 		a.onAddSubTask(types.TaskTypeVerifyingLinks, key, link)
 		log.Printf("Added subtask for link verification: %s with key: %s", link, key)
-		a.onSubTaskStatusUpdate(types.TaskTypeVerifyingLinks, key, types.TaskStatusCompleted)
+
+		wg.Add(1)
+		go func(link, key string) {
+			defer wg.Done()
+
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			a.onSubTaskStatusUpdate(types.TaskTypeVerifyingLinks, key, types.TaskStatusRunning)
+
+			status := a.verifyLink(client, link)
+
+			a.onSubTaskStatusUpdate(types.TaskTypeVerifyingLinks, key, status)
+		}(link, key)
 	}
+
+	wg.Wait()
+	log.Printf("Completed link verification for %d links", len(a.links))
+}
+
+func (a *Analyzer) verifyLink(client *http.Client, link string) types.TaskStatus {
+	parsedURL, err := url.Parse(link)
+	if err != nil {
+		log.Printf("Error parsing URL: %s, error: %v", link, err)
+		return types.TaskStatusFailed
+	}
+
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		log.Printf("Skipping non-HTTP URL: %s", link)
+		return types.TaskStatusSkipped
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, link, nil)
+	if err != nil {
+		log.Printf("Failed to create request %s: %v", link, err)
+		return types.TaskStatusFailed
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("Failed to verify link %s: %v", link, err)
+		return types.TaskStatusFailed
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+		log.Printf("Link verified: %s, status: %d", link, resp.StatusCode)
+		return types.TaskStatusCompleted
+	}
+
+	log.Printf("Link verification failed: %s, status: %d", link, resp.StatusCode)
+	return types.TaskStatusFailed
 }
