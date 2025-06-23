@@ -99,6 +99,16 @@ func processMessage(am types.AnalyzeMessage) {
 		if err != nil {
 			log.Printf("Update subtask status failed: %v", err)
 		}
+	}, func(taskType types.TaskType, key, url string) {
+		log.Printf("Adding subtask for URL %v with key %v", url, key)
+		err := taskRepo.AddSubTaskByKey(am.JobId, taskType, key, types.SubTask{
+			Type:   types.SubTaskTypeValidatingLink,
+			Status: types.TaskStatusPending,
+			URL:    url,
+		})
+		if err != nil {
+			log.Printf("Add subtask failed: %v", err)
+		}
 	})
 	res, err := a.AnalyzeHTML(string(b))
 	if err != nil {

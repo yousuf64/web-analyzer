@@ -30,26 +30,18 @@ func (t *TaskRepository) CreateTasks(tasks ...*types.Task) error {
 		return nil
 	}
 
-	if len(tasks) == 1 {
-		item, err := dynamodbattribute.MarshalMap(tasks[0])
-		if err != nil {
-			return err
-		}
-
-		input := &dynamodb.PutItemInput{
-			TableName: aws.String(TasksTableName),
-			Item:      item,
-		}
-
-		_, err = t.dynamodb.PutItem(input)
-		return err
-	}
-
 	var writeRequests []*dynamodb.WriteRequest
 	for _, task := range tasks {
 		item, err := dynamodbattribute.MarshalMap(task)
 		if err != nil {
 			return err
+		}
+
+		if len(task.SubTasks) == 0 {
+			// Initialize subtasks as empty map
+			item["subtasks"] = &dynamodb.AttributeValue{
+				M: map[string]*dynamodb.AttributeValue{},
+			}
 		}
 
 		writeRequest := &dynamodb.WriteRequest{
@@ -97,6 +89,38 @@ func (t *TaskRepository) UpdateTaskStatus(jobId string, taskType types.TaskType,
 	}
 
 	_, err := t.dynamodb.UpdateItem(input)
+	return err
+}
+
+func (t *TaskRepository) AddSubTaskByKey(jobId string, taskType types.TaskType, key string, subtask types.SubTask) error {
+	subtaskItem, err := dynamodbattribute.MarshalMap(subtask)
+	if err != nil {
+		return err
+	}
+
+	input := &dynamodb.UpdateItemInput{
+		TableName: aws.String(TasksTableName),
+		Key: map[string]*dynamodb.AttributeValue{
+			"job_id": {
+				S: aws.String(jobId),
+			},
+			"type": {
+				S: aws.String(string(taskType)),
+			},
+		},
+		UpdateExpression: aws.String("SET #subtasks.#key = :subtask"),
+		ExpressionAttributeNames: map[string]*string{
+			"#subtasks": aws.String("subtasks"),
+			"#key":      aws.String(key),
+		},
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":subtask": {
+				M: subtaskItem,
+			},
+		},
+	}
+
+	_, err = t.dynamodb.UpdateItem(input)
 	return err
 }
 

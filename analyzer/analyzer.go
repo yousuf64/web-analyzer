@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"shared/types"
+	"strconv"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -16,12 +17,20 @@ type Analyzer struct {
 	hasLoginForm          bool
 	onTaskStatusUpdate    func(taskType types.TaskType, status types.TaskStatus)
 	onSubTaskStatusUpdate func(taskType types.TaskType, key string, status types.TaskStatus)
+	onAddSubTask          func(taskType types.TaskType, key, url string) // Takes the key as parameter
 }
 
 func NewAnalyzer(
 	onTaskStatusUpdate func(taskType types.TaskType, status types.TaskStatus),
-	onSubTaskStatusUpdate func(taskType types.TaskType, key string, status types.TaskStatus)) *Analyzer {
-	return &Analyzer{onTaskStatusUpdate: onTaskStatusUpdate, onSubTaskStatusUpdate: onSubTaskStatusUpdate}
+	onSubTaskStatusUpdate func(taskType types.TaskType, key string, status types.TaskStatus),
+	onAddSubTask func(taskType types.TaskType, key, url string)) *Analyzer {
+	return &Analyzer{
+		headings:              make(map[string]int),
+		links:                 []string{},
+		onTaskStatusUpdate:    onTaskStatusUpdate,
+		onSubTaskStatusUpdate: onSubTaskStatusUpdate,
+		onAddSubTask:          onAddSubTask,
+	}
 }
 
 func (a *Analyzer) AnalyzeHTML(content string) (types.AnalyzeResult, error) {
@@ -41,6 +50,10 @@ func (a *Analyzer) AnalyzeHTML(content string) (types.AnalyzeResult, error) {
 	a.onTaskStatusUpdate(types.TaskTypeAnalyzing, types.TaskStatusRunning)
 	a.dfs(doc)
 	a.onTaskStatusUpdate(types.TaskTypeAnalyzing, types.TaskStatusCompleted)
+
+	a.onTaskStatusUpdate(types.TaskTypeVerifyingLinks, types.TaskStatusRunning)
+	a.verifyLinks()
+	a.onTaskStatusUpdate(types.TaskTypeVerifyingLinks, types.TaskStatusCompleted)
 
 	return types.AnalyzeResult{
 		HtmlVersion:  a.htmlVersion,
@@ -65,7 +78,9 @@ func (a *Analyzer) dfs(n *html.Node) {
 	if n.Type == html.ElementNode {
 		switch n.Data {
 		case "title":
-			a.title = strings.TrimSpace(n.FirstChild.Data)
+			if n.FirstChild != nil {
+				a.title = strings.TrimSpace(n.FirstChild.Data)
+			}
 		case "h1", "h2", "h3", "h4", "h5", "h6":
 			a.headings[n.Data]++
 		case "a":
@@ -119,5 +134,16 @@ func (a *Analyzer) dfsFormInputs(n *html.Node, hasPassword, hasEmail *bool) {
 		if *hasPassword && *hasEmail {
 			break
 		}
+	}
+}
+
+func (a *Analyzer) verifyLinks() {
+	log.Printf("Starting link verification for %d links", len(a.links))
+
+	for i, link := range a.links {
+		key := strconv.Itoa(i + 1)
+		a.onAddSubTask(types.TaskTypeVerifyingLinks, key, link)
+		log.Printf("Added subtask for link verification: %s with key: %s", link, key)
+		a.onSubTaskStatusUpdate(types.TaskTypeVerifyingLinks, key, types.TaskStatusCompleted)
 	}
 }
