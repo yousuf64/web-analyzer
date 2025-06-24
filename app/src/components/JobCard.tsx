@@ -41,7 +41,17 @@ export function JobCard({ job, isNew = false }: JobCardProps) {
             <p><span>HTML Version:</span> {job.result.html_version}</p>
             <p><span>Page Title:</span> {job.result.page_title}</p>
             <p><span>Has Login Form:</span> {job.result.has_login_form ? 'Yes' : 'No'}</p>
-            <p><span>Links Found:</span> {job.result.links.length}</p>
+            
+            <div>
+              <span>Links:</span>
+              <div className="ml-4 mt-1 grid grid-cols-2 gap-x-4 gap-y-1">
+                <p>Total: {job.result.links.length}</p>
+                <p>Internal: {job.result.internal_link_count}</p>
+                <p>External: {job.result.external_link_count}</p>
+                <p>Accessible: {job.result.accessible_links}</p>
+                <p>Inaccessible: {job.result.inaccessible_links}</p>
+              </div>
+            </div>
 
             {Object.keys(job.result.headings).length > 0 && (
               <div>

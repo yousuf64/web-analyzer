@@ -175,6 +175,10 @@ func analyze(am messagebus.AnalyzeMessage) (err error) {
 		slog.String("jobId", am.JobId),
 		slog.String("htmlVersion", res.HtmlVersion),
 		slog.Int("linkCount", len(res.Links)),
+		slog.Int("internalLinks", res.InternalLinkCount),
+		slog.Int("externalLinks", res.ExternalLinkCount),
+		slog.Int("accessibleLinks", res.AccessibleLinks),
+		slog.Int("inaccessibleLinks", res.InaccessibleLinks),
 		slog.Bool("hasLoginForm", res.HasLoginForm))
 
 	completedStatus := types.JobStatusCompleted

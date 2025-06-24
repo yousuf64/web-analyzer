@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"golang.org/x/net/html"
 )
@@ -22,12 +23,16 @@ type AddSubTaskCallback func(taskType types.TaskType, key, url string)
 type SubTaskStatusUpdateCallback func(taskType types.TaskType, key string, status types.TaskStatus)
 
 type Analyzer struct {
-	htmlVersion  string
-	title        string
-	headings     map[string]int
-	links        []string
-	hasLoginForm bool
-	baseUrl      string
+	htmlVersion       string
+	title             string
+	headings          map[string]int
+	links             []string
+	internalLinks     int
+	externalLinks     int
+	accessibleLinks   atomic.Int32
+	inaccessibleLinks atomic.Int32
+	hasLoginForm      bool
+	baseUrl           string
 
 	hc *http.Client
 
@@ -69,11 +74,15 @@ func (a *Analyzer) AnalyzeHTML(content string) (types.AnalyzeResult, error) {
 	a.TaskStatusUpdateCallback(types.TaskTypeVerifyingLinks, types.TaskStatusCompleted)
 
 	return types.AnalyzeResult{
-		HtmlVersion:  a.htmlVersion,
-		PageTitle:    a.title,
-		Headings:     a.headings,
-		Links:        a.links,
-		HasLoginForm: a.hasLoginForm,
+		HtmlVersion:       a.htmlVersion,
+		PageTitle:         a.title,
+		Headings:          a.headings,
+		Links:             a.links,
+		InternalLinkCount: a.internalLinks,
+		ExternalLinkCount: a.externalLinks,
+		AccessibleLinks:   int(a.accessibleLinks.Load()),
+		InaccessibleLinks: int(a.inaccessibleLinks.Load()),
+		HasLoginForm:      a.hasLoginForm,
 	}, nil
 }
 
@@ -107,9 +116,15 @@ func (a *Analyzer) dfs(n *html.Node) {
 					href := attr.Val
 					if a.shouldProcessLink(href) {
 						// Handle relative URLs by resolving them against the base URL
-						resolvedURL := a.resolveURL(href)
+						resolvedURL, isExternal := a.resolveURL(href)
 						if resolvedURL != "" {
 							a.links = append(a.links, resolvedURL)
+
+							if isExternal {
+								a.externalLinks++
+							} else {
+								a.internalLinks++
+							}
 						}
 					}
 				}
@@ -126,31 +141,32 @@ func (a *Analyzer) dfs(n *html.Node) {
 	}
 }
 
-func (a *Analyzer) resolveURL(href string) string {
+// resolveURL resolves a relative URL to an absolute URL and returns true if the URL is external
+func (a *Analyzer) resolveURL(href string) (string, bool) {
 	// Absolute URL, no need to resolve
 	if strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://") {
-		return href
+		return href, true
 	}
 
 	if a.baseUrl == "" {
 		logger.Warn("Cannot resolve relative URL without base URL", slog.String("href", href))
-		return ""
+		return "", false
 	}
 
 	base, err := url.Parse(a.baseUrl)
 	if err != nil {
 		logger.Error("Failed to parse base URL", slog.String("baseURL", a.baseUrl), slog.Any("error", err))
-		return ""
+		return "", false
 	}
 
 	relativeURL, err := url.Parse(href)
 	if err != nil {
 		logger.Error("Failed to parse relative URL", slog.String("href", href), slog.Any("error", err))
-		return ""
+		return "", false
 	}
 
 	resolvedURL := base.ResolveReference(relativeURL)
-	return resolvedURL.String()
+	return resolvedURL.String(), false
 }
 
 func (a *Analyzer) shouldProcessLink(href string) bool {
@@ -250,6 +266,13 @@ func (a *Analyzer) verifyLinks() {
 			a.SubTaskStatusUpdateCallback(types.TaskTypeVerifyingLinks, key, types.TaskStatusRunning)
 			status := a.verifyLink(link)
 			a.SubTaskStatusUpdateCallback(types.TaskTypeVerifyingLinks, key, status)
+
+			if status == types.TaskStatusCompleted {
+				a.accessibleLinks.Add(1)
+			} else {
+				a.inaccessibleLinks.Add(1)
+			}
+
 		}(link, key)
 	}
 

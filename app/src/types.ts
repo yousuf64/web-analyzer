@@ -16,6 +16,10 @@ export interface AnalyzeResult {
   page_title: string;
   headings: Record<string, number>;
   links: string[];
+  internal_link_count: number;
+  external_link_count: number;
+  accessible_links: number;
+  inaccessible_links: number;
   has_login_form: boolean;
 }
 
