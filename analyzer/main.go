@@ -103,7 +103,7 @@ func main() {
 }
 
 func messageHandler(msg *nats.Msg) {
-	var am types.AnalyzeMessage
+	var am messagebus.AnalyzeMessage
 	if err := json.Unmarshal(msg.Data, &am); err != nil {
 		logger.Error("Failed to unmarshal analyze message",
 			slog.Any("error", err),
@@ -127,7 +127,7 @@ func messageHandler(msg *nats.Msg) {
 		slog.Duration("processingTime", duration))
 }
 
-func analyze(am types.AnalyzeMessage) (err error) {
+func analyze(am messagebus.AnalyzeMessage) (err error) {
 	defer func() {
 		if err != nil {
 			logger.Error("Analysis failed",
@@ -161,6 +161,7 @@ func analyze(am types.AnalyzeMessage) (err error) {
 	}
 
 	an := NewAnalyzer()
+	an.SetBaseUrl(job.URL)
 	an.TaskStatusUpdateCallback = updateTaskStatus(am.JobId)
 	an.AddSubTaskCallback = addSubTask(am.JobId)
 	an.SubTaskStatusUpdateCallback = updateSubTaskStatus(am.JobId)

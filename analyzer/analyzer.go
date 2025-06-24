@@ -27,6 +27,7 @@ type Analyzer struct {
 	headings     map[string]int
 	links        []string
 	hasLoginForm bool
+	baseUrl      string
 
 	hc *http.Client
 
@@ -76,6 +77,11 @@ func (a *Analyzer) AnalyzeHTML(content string) (types.AnalyzeResult, error) {
 	}, nil
 }
 
+// SetBaseUrl sets the base URL for resolving relative links
+func (a *Analyzer) SetBaseUrl(baseUrl string) {
+	a.baseUrl = baseUrl
+}
+
 func (a *Analyzer) detectHtmlVersion(content string) string {
 	content = strings.ToLower(content)
 
@@ -98,7 +104,14 @@ func (a *Analyzer) dfs(n *html.Node) {
 		case "a":
 			for _, attr := range n.Attr {
 				if attr.Key == "href" && attr.Val != "" {
-					a.links = append(a.links, attr.Val)
+					href := attr.Val
+					if a.shouldProcessLink(href) {
+						// Handle relative URLs by resolving them against the base URL
+						resolvedURL := a.resolveURL(href)
+						if resolvedURL != "" {
+							a.links = append(a.links, resolvedURL)
+						}
+					}
 				}
 			}
 		case "form":
@@ -111,6 +124,65 @@ func (a *Analyzer) dfs(n *html.Node) {
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		a.dfs(c)
 	}
+}
+
+func (a *Analyzer) resolveURL(href string) string {
+	// Absolute URL, no need to resolve
+	if strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://") {
+		return href
+	}
+
+	if a.baseUrl == "" {
+		logger.Warn("Cannot resolve relative URL without base URL", slog.String("href", href))
+		return ""
+	}
+
+	base, err := url.Parse(a.baseUrl)
+	if err != nil {
+		logger.Error("Failed to parse base URL", slog.String("baseURL", a.baseUrl), slog.Any("error", err))
+		return ""
+	}
+
+	relativeURL, err := url.Parse(href)
+	if err != nil {
+		logger.Error("Failed to parse relative URL", slog.String("href", href), slog.Any("error", err))
+		return ""
+	}
+
+	resolvedURL := base.ResolveReference(relativeURL)
+	return resolvedURL.String()
+}
+
+func (a *Analyzer) shouldProcessLink(href string) bool {
+	if href == "" || href == "/" {
+		return false
+	}
+
+	if strings.HasPrefix(href, "#") {
+		return false
+	}
+
+	if strings.HasPrefix(href, "javascript:") {
+		return false
+	}
+
+	if strings.HasPrefix(href, "mailto:") {
+		return false
+	}
+
+	if strings.HasPrefix(href, "tel:") {
+		return false
+	}
+
+	if strings.HasPrefix(href, "data:") {
+		return false
+	}
+
+	if strings.HasPrefix(href, "about:") {
+		return false
+	}
+
+	return true
 }
 
 func (a *Analyzer) isLoginForm(formNode *html.Node) bool {
