@@ -5,6 +5,7 @@ import type { Task, TaskType } from '../types';
 
 interface TaskCardProps {
   jobId: string;
+  jobStatus: string;
 }
 
 interface TasksState {
@@ -32,7 +33,7 @@ function sortTasks(tasks: Task[]): Task[] {
   return [...tasks].sort((a, b) => getTaskOrder(a.type) - getTaskOrder(b.type));
 }
 
-export function TaskCard({ jobId }: TaskCardProps) {
+export function TaskCard({ jobId, jobStatus }: TaskCardProps) {
   const [state, setState] = useState<TasksState>({
     tasks: null,
     loading: false,
@@ -40,7 +41,22 @@ export function TaskCard({ jobId }: TaskCardProps) {
   });
 
   useEffect(() => {
+    setState(prev => ({ ...prev, loading: true }));
+    ApiService.getTasks(jobId)
+      .then(tasks => setState(prev => ({ ...prev, tasks: sortTasks(tasks), loading: false })))
+      .catch(error => setState(prev => ({ ...prev, error: error.message, loading: false })));
+  }, [jobId]);
+
+  useEffect(() => {
     webSocketService.connect();
+
+    const isCompleted = jobStatus === 'completed' || jobStatus === 'failed';
+
+    if (isCompleted) {
+      return;
+    }
+
+    // Set up subscriptions for active jobs
     webSocketService.subscribeToGroup(jobId);
 
     const unsubscribeTask = webSocketService.subscribeToTaskUpdates((updatedJobId, taskType, status) => {
@@ -101,18 +117,12 @@ export function TaskCard({ jobId }: TaskCardProps) {
       }
     );
 
-    setState(prev => ({ ...prev, loading: true }));
-    ApiService.getTasks(jobId)
-      .then(tasks => setState(prev => ({ ...prev, tasks: sortTasks(tasks), loading: false })))
-      .catch(error => setState(prev => ({ ...prev, error: error.message, loading: false })));
-
     return () => {
       unsubscribeTask();
       unsubscribeSubTask();
       webSocketService.unsubscribeFromGroup(jobId);
     };
-  }, [jobId]);
-
+  }, [jobId, jobStatus]);
 
 
   if (state.loading) {

@@ -69,7 +69,7 @@ export function JobCard({ job }: JobCardProps) {
         
         {expanded && (
           <div className="mt-2">
-            <TaskCard jobId={job.id} />
+            <TaskCard jobId={job.id} jobStatus={job.status} />
           </div>
         )}
       </div>
