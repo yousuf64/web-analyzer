@@ -148,6 +148,12 @@ func (j *JobRepository) UpdateJob(id string, status *types.JobStatus, result *ty
 				M: make(map[string]*dynamodb.AttributeValue),
 			}
 		}
+
+		if len(result.Links) == 0 {
+			resultAttr.M["links"] = &dynamodb.AttributeValue{
+				L: []*dynamodb.AttributeValue{},
+			}
+		}
 		expressionAttributeValues[":result"] = resultAttr
 	}
 
