@@ -45,23 +45,21 @@ func broadcastToUsers(message any) {
 	wsLock.RLock()
 	defer wsLock.RUnlock()
 
-	for conn := range wsConnections {
-		if len(conn.jobIDs) > 0 {
-			var msgJobID string
-			switch msg := message.(type) {
-			case messagebus.JobUpdateMessage:
-				msgJobID = msg.JobID
-			case messagebus.TaskStatusUpdateMessage:
-				msgJobID = msg.JobID
-			case messagebus.SubTaskStatusUpdateMessage:
-				msgJobID = msg.JobID
-			default:
-				// Unknown message type, send to all connections
-			}
+	var msgJobID string
+	switch m := message.(type) {
+	case messagebus.TaskStatusUpdateMessage:
+		msgJobID = m.JobID
+	case messagebus.SubTaskStatusUpdateMessage:
+		msgJobID = m.JobID
+	case messagebus.JobUpdateMessage:
+		msgJobID = "" // Broadcast to all connections
+	default:
+		// Broadcast to all connections
+	}
 
-			if msgJobID != "" && !slices.Contains(conn.jobIDs, msgJobID) {
-				continue
-			}
+	for conn := range wsConnections {
+		if msgJobID != "" && !slices.Contains(conn.jobIDs, msgJobID) {
+			continue
 		}
 
 		err := conn.conn.WriteMessage(websocket.TextMessage, jsonMessage)
@@ -151,6 +149,17 @@ func corsMiddleware(next shift.HandlerFunc) shift.HandlerFunc {
 	}
 }
 
+func errorMiddleware(next shift.HandlerFunc) shift.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request, route shift.Route) error {
+		err := next(w, r, route)
+		if err != nil {
+			log.Printf("Error: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return err
+	}
+}
+
 func main() {
 	dynamodb, err := repository.NewDynamoDBClient()
 	if err != nil {
@@ -178,6 +187,7 @@ func main() {
 
 	router := shift.New()
 	router.Use(corsMiddleware)
+	router.Use(errorMiddleware)
 
 	// Register OPTIONS handler for all routes, so that CORS is handled by the middleware
 	router.OPTIONS("/*wildcard", func(w http.ResponseWriter, r *http.Request, route shift.Route) error {
@@ -192,16 +202,18 @@ func main() {
 		}
 
 		jobId := strconv.Itoa(int(time.Now().UnixNano()))
-		jobRepo.CreateJob(&types.Job{
-			ID:          jobId,
-			URL:         req.Url,
-			Status:      types.JobStatusPending,
-			CreatedAt:   time.Time{},
-			UpdatedAt:   time.Time{},
-			StartedAt:   nil,
-			CompletedAt: nil,
-			Result:      nil,
-		})
+		job := &types.Job{
+			ID:        jobId,
+			URL:       req.Url,
+			Status:    types.JobStatusPending,
+			CreatedAt: time.Time{},
+			UpdatedAt: time.Time{},
+		}
+		err := jobRepo.CreateJob(job)
+
+		if err != nil {
+			return err
+		}
 
 		err = taskRepo.CreateTasks(&types.Task{
 			JobID:  jobId,
@@ -238,7 +250,9 @@ func main() {
 		log.Printf("Message published: %v", req)
 
 		w.WriteHeader(http.StatusAccepted)
-		return nil
+		return json.NewEncoder(w).Encode(types.AnalyzeResponse{
+			Job: *job,
+		})
 	})
 
 	router.GET("/jobs", func(w http.ResponseWriter, r *http.Request, route shift.Route) error {

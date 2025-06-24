@@ -59,43 +59,25 @@ func createJobsTableIfNotExists(client *dynamodb.DynamoDB, tableName string) err
 		TableName: aws.String(tableName),
 		KeySchema: []*dynamodb.KeySchemaElement{
 			{
-				AttributeName: aws.String("id"),
+				AttributeName: aws.String("partition_key"),
 				KeyType:       aws.String("HASH"),
+			},
+			{
+				AttributeName: aws.String("id"),
+				KeyType:       aws.String("RANGE"),
 			},
 		},
 		AttributeDefinitions: []*dynamodb.AttributeDefinition{
 			{
+				AttributeName: aws.String("partition_key"),
+				AttributeType: aws.String("S"),
+			},
+			{
 				AttributeName: aws.String("id"),
-				AttributeType: aws.String("S"),
-			},
-			{
-				AttributeName: aws.String("status"),
-				AttributeType: aws.String("S"),
-			},
-			{
-				AttributeName: aws.String("created_at"),
 				AttributeType: aws.String("S"),
 			},
 		},
 		BillingMode: aws.String("PAY_PER_REQUEST"),
-		GlobalSecondaryIndexes: []*dynamodb.GlobalSecondaryIndex{
-			{
-				IndexName: aws.String("status-created_at-index"),
-				KeySchema: []*dynamodb.KeySchemaElement{
-					{
-						AttributeName: aws.String("status"),
-						KeyType:       aws.String("HASH"),
-					},
-					{
-						AttributeName: aws.String("created_at"),
-						KeyType:       aws.String("RANGE"),
-					},
-				},
-				Projection: &dynamodb.Projection{
-					ProjectionType: aws.String("ALL"),
-				},
-			},
-		},
 	}
 
 	_, err = client.CreateTable(input)
@@ -137,34 +119,8 @@ func createTasksTableIfNotExists(client *dynamodb.DynamoDB, tableName string) er
 				AttributeName: aws.String("type"),
 				AttributeType: aws.String("S"),
 			},
-			{
-				AttributeName: aws.String("status"),
-				AttributeType: aws.String("S"),
-			},
-			{
-				AttributeName: aws.String("created_at"),
-				AttributeType: aws.String("S"),
-			},
 		},
 		BillingMode: aws.String("PAY_PER_REQUEST"),
-		GlobalSecondaryIndexes: []*dynamodb.GlobalSecondaryIndex{
-			{
-				IndexName: aws.String("status-created_at-index"),
-				KeySchema: []*dynamodb.KeySchemaElement{
-					{
-						AttributeName: aws.String("status"),
-						KeyType:       aws.String("HASH"),
-					},
-					{
-						AttributeName: aws.String("created_at"),
-						KeyType:       aws.String("RANGE"),
-					},
-				},
-				Projection: &dynamodb.Projection{
-					ProjectionType: aws.String("ALL"),
-				},
-			},
-		},
 	}
 
 	_, err = client.CreateTable(input)

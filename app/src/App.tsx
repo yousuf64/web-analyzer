@@ -40,7 +40,7 @@ function App() {
     setLoading(true);
     ApiService.getJobs()
       .then(jobs => {
-        setJobs(jobs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+        setJobs(jobs);
         setLoading(false);
       })
       .catch(error => {

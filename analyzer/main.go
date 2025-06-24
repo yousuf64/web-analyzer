@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"shared/messagebus"
 	"shared/repository"
 	"shared/types"
 	"syscall"
@@ -16,6 +17,23 @@ import (
 
 var jobRepo *repository.JobRepository
 var taskRepo *repository.TaskRepository
+var nc *nats.Conn
+var mb *messagebus.MessageBus
+
+func updateJobStatus(jobId string, status types.JobStatus) {
+	err := jobRepo.UpdateJobStatus(jobId, status)
+	if err != nil {
+		log.Printf("Failed to update job status: %v", err)
+		return
+	}
+
+	mb.PublishJobUpdate(messagebus.JobUpdateMessage{
+		Type:   messagebus.JobUpdateMessageType,
+		JobID:  jobId,
+		Status: string(status),
+		Result: nil,
+	})
+}
 
 func main() {
 	dynamodb, err := repository.NewDynamoDBClient()
@@ -34,11 +52,13 @@ func main() {
 		log.Fatalf("Failed to create taskRepository %v", err)
 	}
 
-	nc, err := nats.Connect(nats.DefaultURL)
+	nc, err = nats.Connect(nats.DefaultURL)
 	if err != nil {
 		log.Fatalf("Failed to connect to NATS: %v", err)
 	}
 	defer nc.Close()
+
+	mb = messagebus.New(nc)
 
 	sub, err := nc.Subscribe("url.analyze", func(msg *nats.Msg) {
 		var am types.AnalyzeMessage
@@ -93,12 +113,29 @@ func processMessage(am types.AnalyzeMessage) {
 		err := taskRepo.UpdateTaskStatus(am.JobId, taskType, status)
 		if err != nil {
 			log.Printf("Update task status failed: %v", err)
+			return
 		}
+
+		mb.PublishTaskStatusUpdate(messagebus.TaskStatusUpdateMessage{
+			Type:     messagebus.TaskStatusUpdateMessageType,
+			JobID:    am.JobId,
+			TaskType: string(taskType),
+			Status:   string(status),
+		})
 	}, func(taskType types.TaskType, key string, status types.TaskStatus) {
 		err := taskRepo.UpdateSubTaskStatusByKey(am.JobId, taskType, key, status)
 		if err != nil {
 			log.Printf("Update subtask status failed: %v", err)
+			return
 		}
+
+		mb.PublishSubTaskStatusUpdate(messagebus.SubTaskStatusUpdateMessage{
+			Type:     messagebus.SubTaskStatusUpdateMessageType,
+			JobID:    am.JobId,
+			TaskType: string(taskType),
+			Key:      key,
+			Status:   string(status),
+		})
 	}, func(taskType types.TaskType, key, url string) {
 		log.Printf("Adding subtask for URL %v with key %v", url, key)
 		err := taskRepo.AddSubTaskByKey(am.JobId, taskType, key, types.SubTask{
@@ -108,7 +145,17 @@ func processMessage(am types.AnalyzeMessage) {
 		})
 		if err != nil {
 			log.Printf("Add subtask failed: %v", err)
+			return
 		}
+
+		mb.PublishSubTaskStatusUpdate(messagebus.SubTaskStatusUpdateMessage{
+			Type:     messagebus.SubTaskStatusUpdateMessageType,
+			JobID:    am.JobId,
+			TaskType: string(taskType),
+			Key:      key,
+			Status:   string(types.TaskStatusPending),
+			URL:      url,
+		})
 	})
 	res, err := a.AnalyzeHTML(string(b))
 	if err != nil {
@@ -122,11 +169,6 @@ func processMessage(am types.AnalyzeMessage) {
 		log.Fatalf("Failed updating job %v", err)
 		updateJobStatus(am.JobId, types.JobStatusFailed)
 	}
-}
 
-func updateJobStatus(url string, status types.JobStatus) {
-	err := jobRepo.UpdateJobStatus(url, types.JobStatusRunning)
-	if err != nil {
-		log.Fatalf("Failed updating job status %v", err)
-	}
+	updateJobStatus(am.JobId, types.JobStatusCompleted)
 }

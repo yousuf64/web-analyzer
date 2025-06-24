@@ -27,6 +27,7 @@ func NewJobRepository() (*JobRepository, error) {
 }
 
 func (j *JobRepository) CreateJob(job *types.Job) error {
+	job.PartitionKey = "1000"
 	item, err := dynamodbattribute.MarshalMap(job)
 	if err != nil {
 		return err
@@ -45,6 +46,9 @@ func (j *JobRepository) GetJob(id string) (*types.Job, error) {
 	input := &dynamodb.GetItemInput{
 		TableName: aws.String(JobsTableName),
 		Key: map[string]*dynamodb.AttributeValue{
+			"partition_key": {
+				S: aws.String("1000"),
+			},
 			"id": {
 				S: aws.String(id),
 			},
@@ -70,16 +74,26 @@ func (j *JobRepository) GetJob(id string) (*types.Job, error) {
 }
 
 func (j *JobRepository) GetAllJobs() ([]*types.Job, error) {
-	input := &dynamodb.ScanInput{
-		TableName: aws.String(JobsTableName),
+	input := &dynamodb.QueryInput{
+		TableName:              aws.String(JobsTableName),
+		KeyConditionExpression: aws.String("#partition_key = :partition_key"),
+		ExpressionAttributeNames: map[string]*string{
+			"#partition_key": aws.String("partition_key"),
+		},
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":partition_key": {
+				S: aws.String("1000"),
+			},
+		},
+		ScanIndexForward: aws.Bool(false), // false for descending order since JobID is based on timestamp
 	}
 
-	result, err := j.dynamodb.Scan(input)
+	result, err := j.dynamodb.Query(input)
 	if err != nil {
 		return nil, err
 	}
 
-	var jobs []*types.Job
+	jobs := make([]*types.Job, 0, len(result.Items))
 	for _, item := range result.Items {
 		var job types.Job
 		err = dynamodbattribute.UnmarshalMap(item, &job)
@@ -96,6 +110,9 @@ func (j *JobRepository) UpdateJobStatus(id string, status types.JobStatus) error
 	input := &dynamodb.UpdateItemInput{
 		TableName: aws.String(JobsTableName),
 		Key: map[string]*dynamodb.AttributeValue{
+			"partition_key": {
+				S: aws.String("1000"),
+			},
 			"id": {
 				S: aws.String(id),
 			},
@@ -160,6 +177,9 @@ func (j *JobRepository) UpdateJob(id string, status *types.JobStatus, result *ty
 	input := &dynamodb.UpdateItemInput{
 		TableName: aws.String(JobsTableName),
 		Key: map[string]*dynamodb.AttributeValue{
+			"partition_key": {
+				S: aws.String("1000"),
+			},
 			"id": {
 				S: aws.String(id),
 			},
