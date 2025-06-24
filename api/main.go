@@ -1,15 +1,17 @@
 package main
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"log"
 	"net/http"
 	"shared/repository"
 	"shared/types"
-	"strconv"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/oklog/ulid/v2"
 	"github.com/yousuf64/shift"
 )
 
@@ -77,13 +79,14 @@ func main() {
 			return err
 		}
 
-		jobId := strconv.Itoa(int(time.Now().UnixNano()))
+		jobId := generateId()
+
 		job := &types.Job{
 			ID:        jobId,
 			URL:       req.Url,
 			Status:    types.JobStatusPending,
-			CreatedAt: time.Time{},
-			UpdatedAt: time.Time{},
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
 		}
 		err := jobRepo.CreateJob(job)
 
@@ -161,4 +164,22 @@ func main() {
 
 	log.Printf("API server listening on :8080")
 	log.Fatal(http.ListenAndServe(":8080", router.Serve()))
+}
+
+// entropyPool provides a pool of monotonic entropy sources for ULID generation
+// This allows for better performance in concurrent scenarios by avoiding lock contention
+var entropyPool = sync.Pool{
+	New: func() any {
+		return ulid.Monotonic(rand.Reader, 0)
+	},
+}
+
+func generateId() string {
+	e := entropyPool.Get().(*ulid.MonotonicEntropy)
+
+	ts := ulid.Timestamp(time.Now())
+	id := ulid.MustNew(ts, e)
+
+	entropyPool.Put(e)
+	return id.String()
 }

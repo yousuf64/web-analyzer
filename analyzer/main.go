@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -67,7 +68,11 @@ func main() {
 			return
 		}
 
-		processMessage(am)
+		err := processMessage(am)
+		if err != nil {
+			log.Printf("Failed to process message: %v", err)
+			return
+		}
 	})
 	if err != nil {
 		log.Fatalf("Failed to subscribe: %v", err)
@@ -83,30 +88,33 @@ func main() {
 	log.Println("Shutting down analyzer...")
 }
 
-func processMessage(am types.AnalyzeMessage) {
+func processMessage(am types.AnalyzeMessage) (err error) {
+	defer func() {
+		if err != nil {
+			updateJobStatus(am.JobId, types.JobStatusFailed)
+		}
+	}()
+
 	job, err := jobRepo.GetJob(am.JobId)
 	if err != nil {
-		log.Fatalf("Failed to get job %v", err)
+		return errors.Join(err, errors.New("job not found"))
 	}
 
 	updateJobStatus(am.JobId, types.JobStatusRunning)
 
 	r, err := http.NewRequest(http.MethodGet, job.URL, nil)
 	if err != nil {
-		log.Fatalf("Failed to create request %v", err)
-		updateJobStatus(am.JobId, types.JobStatusFailed)
+		return errors.Join(err, errors.New("failed to create request"))
 	}
 
 	resp, err := http.DefaultClient.Do(r)
 	if err != nil {
-		log.Fatalf("HTTP request failed %v", err)
-		updateJobStatus(am.JobId, types.JobStatusFailed)
+		return errors.Join(err, errors.New("failed to execute request"))
 	}
 
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalf("Failed to read the response body %v", err)
-		updateJobStatus(am.JobId, types.JobStatusFailed)
+		return errors.Join(err, errors.New("failed to read response body"))
 	}
 
 	a := NewAnalyzer(func(taskType types.TaskType, status types.TaskStatus) {
@@ -159,16 +167,15 @@ func processMessage(am types.AnalyzeMessage) {
 	})
 	res, err := a.AnalyzeHTML(string(b))
 	if err != nil {
-		log.Fatalf("Failed to analyze HTML %v", err)
-		updateJobStatus(am.JobId, types.JobStatusFailed)
+		return errors.Join(err, errors.New("failed to analyze HTML"))
 	}
 
 	completedStatus := types.JobStatusCompleted
 	err = jobRepo.UpdateJob(job.ID, &completedStatus, &res)
 	if err != nil {
-		log.Fatalf("Failed updating job %v", err)
-		updateJobStatus(am.JobId, types.JobStatusFailed)
+		return errors.Join(err, errors.New("failed to update job"))
 	}
 
 	updateJobStatus(am.JobId, types.JobStatusCompleted)
+	return nil
 }
