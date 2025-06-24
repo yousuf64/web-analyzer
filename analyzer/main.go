@@ -12,17 +12,23 @@ import (
 	"shared/repository"
 	"shared/types"
 	"syscall"
+	"time"
 
 	"github.com/nats-io/nats.go"
 )
 
-var jobRepo *repository.JobRepository
-var taskRepo *repository.TaskRepository
-var nc *nats.Conn
-var mb *messagebus.MessageBus
+const httpClientTimeout = 20 * time.Second
+
+var (
+	jb  *repository.JobRepository
+	tsk *repository.TaskRepository
+	nc  *nats.Conn
+	mb  *messagebus.MessageBus
+	h   *http.Client
+)
 
 func updateJobStatus(jobId string, status types.JobStatus) {
-	err := jobRepo.UpdateJobStatus(jobId, status)
+	err := jb.UpdateJobStatus(jobId, status)
 	if err != nil {
 		log.Printf("Failed to update job status: %v", err)
 		return
@@ -37,20 +43,24 @@ func updateJobStatus(jobId string, status types.JobStatus) {
 }
 
 func main() {
-	dynamodb, err := repository.NewDynamoDBClient()
+	ddc, err := repository.NewDynamoDBClient()
 	if err != nil {
 		log.Fatalf("Failed to create DynamoDB client %v", err)
 	}
-	repository.SeedTables(dynamodb)
+	repository.SeedTables(ddc)
 
-	jobRepo, err = repository.NewJobRepository()
+	jb, err = repository.NewJobRepository()
 	if err != nil {
 		log.Fatalf("Failed to create jobRepository %v", err)
 	}
 
-	taskRepo, err = repository.NewTaskRepository()
+	tsk, err = repository.NewTaskRepository()
 	if err != nil {
 		log.Fatalf("Failed to create taskRepository %v", err)
+	}
+
+	h = &http.Client{
+		Timeout: httpClientTimeout,
 	}
 
 	nc, err = nats.Connect(nats.DefaultURL)
@@ -60,20 +70,7 @@ func main() {
 	defer nc.Close()
 
 	mb = messagebus.New(nc)
-
-	sub, err := nc.Subscribe("url.analyze", func(msg *nats.Msg) {
-		var am types.AnalyzeMessage
-		if err := json.Unmarshal(msg.Data, &am); err != nil {
-			log.Printf("Failed to unmarshal: %v", err)
-			return
-		}
-
-		err := processMessage(am)
-		if err != nil {
-			log.Printf("Failed to process message: %v", err)
-			return
-		}
-	})
+	sub, err := mb.SubscribeToAnalyzeMessage(messageHandler)
 	if err != nil {
 		log.Fatalf("Failed to subscribe: %v", err)
 	}
@@ -88,65 +85,96 @@ func main() {
 	log.Println("Shutting down analyzer...")
 }
 
-func processMessage(am types.AnalyzeMessage) (err error) {
+func messageHandler(msg *nats.Msg) {
+	var am types.AnalyzeMessage
+	if err := json.Unmarshal(msg.Data, &am); err != nil {
+		log.Printf("Failed to unmarshal: %v", err)
+		return
+	}
+
+	err := analyze(am)
+	if err != nil {
+		log.Printf("Failed to process message: %v", err)
+		return
+	}
+}
+
+func analyze(am types.AnalyzeMessage) (err error) {
 	defer func() {
 		if err != nil {
 			updateJobStatus(am.JobId, types.JobStatusFailed)
 		}
 	}()
 
-	job, err := jobRepo.GetJob(am.JobId)
+	job, err := jb.GetJob(am.JobId)
 	if err != nil {
 		return errors.Join(err, errors.New("job not found"))
 	}
 
 	updateJobStatus(am.JobId, types.JobStatusRunning)
 
-	r, err := http.NewRequest(http.MethodGet, job.URL, nil)
+	c, err := fetchContent(job.URL)
 	if err != nil {
-		return errors.Join(err, errors.New("failed to create request"))
+		return errors.Join(err, errors.New("failed to fetch content"))
 	}
 
-	resp, err := http.DefaultClient.Do(r)
+	an := NewAnalyzer()
+	an.TaskStatusUpdateCallback = updateTaskStatus(am.JobId)
+	an.AddSubTaskCallback = addSubTask(am.JobId)
+	an.SubTaskStatusUpdateCallback = updateSubTaskStatus(am.JobId)
+
+	res, err := an.AnalyzeHTML(c)
 	if err != nil {
-		return errors.Join(err, errors.New("failed to execute request"))
+		return errors.Join(err, errors.New("failed to analyze HTML"))
+	}
+
+	completedStatus := types.JobStatusCompleted
+	err = jb.UpdateJob(job.ID, &completedStatus, &res)
+	if err != nil {
+		return errors.Join(err, errors.New("failed to update job"))
+	}
+	return nil
+}
+
+func fetchContent(url string) (string, error) {
+	r, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return "", errors.Join(err, errors.New("failed to create request"))
+	}
+
+	resp, err := h.Do(r)
+	if err != nil {
+		return "", errors.Join(err, errors.New("failed to execute request"))
 	}
 
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return errors.Join(err, errors.New("failed to read response body"))
+		return "", errors.Join(err, errors.New("failed to read response body"))
 	}
 
-	a := NewAnalyzer(func(taskType types.TaskType, status types.TaskStatus) {
-		err := taskRepo.UpdateTaskStatus(am.JobId, taskType, status)
+	return string(b), nil
+}
+
+func updateTaskStatus(jobId string) TaskStatusUpdateCallback {
+	return func(taskType types.TaskType, status types.TaskStatus) {
+		err := tsk.UpdateTaskStatus(jobId, taskType, status)
 		if err != nil {
-			log.Printf("Update task status failed: %v", err)
 			return
 		}
 
 		mb.PublishTaskStatusUpdate(messagebus.TaskStatusUpdateMessage{
 			Type:     messagebus.TaskStatusUpdateMessageType,
-			JobID:    am.JobId,
+			JobID:    jobId,
 			TaskType: string(taskType),
 			Status:   string(status),
 		})
-	}, func(taskType types.TaskType, key string, status types.TaskStatus) {
-		err := taskRepo.UpdateSubTaskStatusByKey(am.JobId, taskType, key, status)
-		if err != nil {
-			log.Printf("Update subtask status failed: %v", err)
-			return
-		}
+	}
+}
 
-		mb.PublishSubTaskStatusUpdate(messagebus.SubTaskStatusUpdateMessage{
-			Type:     messagebus.SubTaskStatusUpdateMessageType,
-			JobID:    am.JobId,
-			TaskType: string(taskType),
-			Key:      key,
-			Status:   string(status),
-		})
-	}, func(taskType types.TaskType, key, url string) {
+func addSubTask(jobId string) AddSubTaskCallback {
+	return func(taskType types.TaskType, key, url string) {
 		log.Printf("Adding subtask for URL %v with key %v", url, key)
-		err := taskRepo.AddSubTaskByKey(am.JobId, taskType, key, types.SubTask{
+		err := tsk.AddSubTaskByKey(jobId, taskType, key, types.SubTask{
 			Type:   types.SubTaskTypeValidatingLink,
 			Status: types.TaskStatusPending,
 			URL:    url,
@@ -158,24 +186,29 @@ func processMessage(am types.AnalyzeMessage) (err error) {
 
 		mb.PublishSubTaskStatusUpdate(messagebus.SubTaskStatusUpdateMessage{
 			Type:     messagebus.SubTaskStatusUpdateMessageType,
-			JobID:    am.JobId,
+			JobID:    jobId,
 			TaskType: string(taskType),
 			Key:      key,
 			Status:   string(types.TaskStatusPending),
 			URL:      url,
 		})
-	})
-	res, err := a.AnalyzeHTML(string(b))
-	if err != nil {
-		return errors.Join(err, errors.New("failed to analyze HTML"))
 	}
 
-	completedStatus := types.JobStatusCompleted
-	err = jobRepo.UpdateJob(job.ID, &completedStatus, &res)
-	if err != nil {
-		return errors.Join(err, errors.New("failed to update job"))
-	}
+}
+func updateSubTaskStatus(jobId string) SubTaskStatusUpdateCallback {
+	return func(taskType types.TaskType, key string, status types.TaskStatus) {
+		err := tsk.UpdateSubTaskStatusByKey(jobId, taskType, key, status)
+		if err != nil {
+			log.Printf("Update subtask status failed: %v", err)
+			return
+		}
 
-	updateJobStatus(am.JobId, types.JobStatusCompleted)
-	return nil
+		mb.PublishSubTaskStatusUpdate(messagebus.SubTaskStatusUpdateMessage{
+			Type:     messagebus.SubTaskStatusUpdateMessageType,
+			JobID:    jobId,
+			TaskType: string(taskType),
+			Key:      key,
+			Status:   string(status),
+		})
+	}
 }

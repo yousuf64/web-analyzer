@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"log"
 	"net/http"
 	"net/url"
@@ -9,56 +8,64 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"golang.org/x/net/html"
 )
 
+const (
+	maxConc = 10
+)
+
+type TaskStatusUpdateCallback func(taskType types.TaskType, status types.TaskStatus)
+type AddSubTaskCallback func(taskType types.TaskType, key, url string)
+type SubTaskStatusUpdateCallback func(taskType types.TaskType, key string, status types.TaskStatus)
+
 type Analyzer struct {
-	htmlVersion           string
-	title                 string
-	headings              map[string]int
-	links                 []string
-	hasLoginForm          bool
-	onTaskStatusUpdate    func(taskType types.TaskType, status types.TaskStatus)
-	onSubTaskStatusUpdate func(taskType types.TaskType, key string, status types.TaskStatus)
-	onAddSubTask          func(taskType types.TaskType, key, url string) // Takes the key as parameter
+	htmlVersion  string
+	title        string
+	headings     map[string]int
+	links        []string
+	hasLoginForm bool
+
+	hc *http.Client
+
+	TaskStatusUpdateCallback    TaskStatusUpdateCallback
+	AddSubTaskCallback          AddSubTaskCallback
+	SubTaskStatusUpdateCallback SubTaskStatusUpdateCallback
 }
 
-func NewAnalyzer(
-	onTaskStatusUpdate func(taskType types.TaskType, status types.TaskStatus),
-	onSubTaskStatusUpdate func(taskType types.TaskType, key string, status types.TaskStatus),
-	onAddSubTask func(taskType types.TaskType, key, url string)) *Analyzer {
+func NewAnalyzer() *Analyzer {
 	return &Analyzer{
-		headings:              make(map[string]int),
-		links:                 []string{},
-		onTaskStatusUpdate:    onTaskStatusUpdate,
-		onSubTaskStatusUpdate: onSubTaskStatusUpdate,
-		onAddSubTask:          onAddSubTask,
+		headings:                    make(map[string]int),
+		links:                       []string{},
+		hc:                          &http.Client{Timeout: httpClientTimeout},
+		TaskStatusUpdateCallback:    func(taskType types.TaskType, status types.TaskStatus) {},
+		AddSubTaskCallback:          func(taskType types.TaskType, key, url string) {},
+		SubTaskStatusUpdateCallback: func(taskType types.TaskType, key string, status types.TaskStatus) {},
 	}
 }
 
 func (a *Analyzer) AnalyzeHTML(content string) (types.AnalyzeResult, error) {
-	a.onTaskStatusUpdate(types.TaskTypeExtracting, types.TaskStatusPending)
+	a.TaskStatusUpdateCallback(types.TaskTypeExtracting, types.TaskStatusPending)
 	doc, err := html.Parse(strings.NewReader(content))
 	if err != nil {
 		log.Printf("Failed to parse HTML: %v", err)
-		a.onTaskStatusUpdate(types.TaskTypeExtracting, types.TaskStatusFailed)
+		a.TaskStatusUpdateCallback(types.TaskTypeExtracting, types.TaskStatusFailed)
 		return types.AnalyzeResult{}, err
 	}
-	a.onTaskStatusUpdate(types.TaskTypeExtracting, types.TaskStatusCompleted)
+	a.TaskStatusUpdateCallback(types.TaskTypeExtracting, types.TaskStatusCompleted)
 
-	a.onTaskStatusUpdate(types.TaskTypeIdentifyingVersion, types.TaskStatusRunning)
+	a.TaskStatusUpdateCallback(types.TaskTypeIdentifyingVersion, types.TaskStatusRunning)
 	a.htmlVersion = a.detectHtmlVersion(content)
-	a.onTaskStatusUpdate(types.TaskTypeIdentifyingVersion, types.TaskStatusCompleted)
+	a.TaskStatusUpdateCallback(types.TaskTypeIdentifyingVersion, types.TaskStatusCompleted)
 
-	a.onTaskStatusUpdate(types.TaskTypeAnalyzing, types.TaskStatusRunning)
+	a.TaskStatusUpdateCallback(types.TaskTypeAnalyzing, types.TaskStatusRunning)
 	a.dfs(doc)
-	a.onTaskStatusUpdate(types.TaskTypeAnalyzing, types.TaskStatusCompleted)
+	a.TaskStatusUpdateCallback(types.TaskTypeAnalyzing, types.TaskStatusCompleted)
 
-	a.onTaskStatusUpdate(types.TaskTypeVerifyingLinks, types.TaskStatusRunning)
+	a.TaskStatusUpdateCallback(types.TaskTypeVerifyingLinks, types.TaskStatusRunning)
 	a.verifyLinks()
-	a.onTaskStatusUpdate(types.TaskTypeVerifyingLinks, types.TaskStatusCompleted)
+	a.TaskStatusUpdateCallback(types.TaskTypeVerifyingLinks, types.TaskStatusCompleted)
 
 	return types.AnalyzeResult{
 		HtmlVersion:  a.htmlVersion,
@@ -149,18 +156,13 @@ func (a *Analyzer) verifyLinks() {
 		return
 	}
 
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-
 	var wg sync.WaitGroup
 
-	maxConcurrency := 10
-	semaphore := make(chan struct{}, maxConcurrency)
+	semaphore := make(chan struct{}, maxConc)
 
 	for i, link := range a.links {
 		key := strconv.Itoa(i + 1)
-		a.onAddSubTask(types.TaskTypeVerifyingLinks, key, link)
+		a.AddSubTaskCallback(types.TaskTypeVerifyingLinks, key, link)
 		log.Printf("Added subtask for link verification: %s with key: %s", link, key)
 
 		wg.Add(1)
@@ -170,11 +172,11 @@ func (a *Analyzer) verifyLinks() {
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
 
-			a.onSubTaskStatusUpdate(types.TaskTypeVerifyingLinks, key, types.TaskStatusRunning)
+			a.SubTaskStatusUpdateCallback(types.TaskTypeVerifyingLinks, key, types.TaskStatusRunning)
 
-			status := a.verifyLink(client, link)
+			status := a.verifyLink(a.hc, link)
 
-			a.onSubTaskStatusUpdate(types.TaskTypeVerifyingLinks, key, status)
+			a.SubTaskStatusUpdateCallback(types.TaskTypeVerifyingLinks, key, status)
 		}(link, key)
 	}
 
@@ -194,10 +196,7 @@ func (a *Analyzer) verifyLink(client *http.Client, link string) types.TaskStatus
 		return types.TaskStatusSkipped
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, link, nil)
+	req, err := http.NewRequest(http.MethodHead, link, nil)
 	if err != nil {
 		log.Printf("Failed to create request %s: %v", link, err)
 		return types.TaskStatusFailed
