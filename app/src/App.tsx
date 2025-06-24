@@ -9,6 +9,7 @@ function App() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [newJobIds, setNewJobIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     webSocketService.connect();
@@ -55,6 +56,7 @@ function App() {
 
   const handleJobCreated = (job: Job) => {
     setJobs(prevJobs => [job, ...prevJobs]);
+    setNewJobIds(prev => new Set([...prev, job.id]));
   };
 
   if (loading) {
@@ -83,6 +85,7 @@ function App() {
           <JobCard
             key={job.id}
             job={job}
+            isNew={newJobIds.has(job.id)}
           />
         ))}
         {jobs.length === 0 && (

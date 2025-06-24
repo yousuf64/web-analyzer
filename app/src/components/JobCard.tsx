@@ -4,10 +4,11 @@ import { TaskCard } from './TaskCard';
 
 interface JobCardProps {
   job: Job;
+  isNew?: boolean;
 }
 
-export function JobCard({ job }: JobCardProps) {
-  const [expanded, setExpanded] = useState(false);
+export function JobCard({ job, isNew = false }: JobCardProps) {
+  const [expanded, setExpanded] = useState(isNew);
 
   return (
     <div className="bg-white shadow-md p-6 border border-gray-200">
