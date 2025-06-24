@@ -9,67 +9,7 @@ interface JobCardProps {
 }
 
 export function JobCard({ job }: JobCardProps) {
-  const [tasks, setTasks] = useState<Task[] | null>(null);
-
-  useEffect(() => {
-    const unsubscribeTask = webSocketService.subscribeToTaskUpdates((jobId, taskType, status) => {
-      if (jobId === job.id) {
-        setTasks(prevTasks => {
-          if (!prevTasks) return prevTasks;
-
-          return prevTasks.map(task => {
-            if (task.type === taskType) {
-              return { ...task, status: status };
-            }
-            return task;
-          });
-        });
-      }
-    });
-
-    const unsubscribeSubTask = webSocketService.subscribeToSubTaskUpdates(
-      (jobId, taskType, key, status, url) => {
-        if (jobId === job.id) {
-          setTasks(prevTasks => {
-            if (!prevTasks) return prevTasks;
-
-            return prevTasks.map(task => {
-              if (task.type === taskType) {
-                const updatedSubtasks = { ...task.subtasks };
-
-                if (!updatedSubtasks[key] && url) {
-                  // New subtask
-                  updatedSubtasks[key] = {
-                    type: 'validating_link',
-                    status: status,
-                    url
-                  };
-                } else if (updatedSubtasks[key]) {
-                  // Update existing subtask
-                  updatedSubtasks[key] = {
-                    ...updatedSubtasks[key],
-                    status: status
-                  };
-                }
-
-                return { ...task, subtasks: Object.fromEntries(Object.entries(updatedSubtasks).sort(([a], [b]) => a.localeCompare(b))) };
-              }
-              return task;
-            });
-          });
-        }
-      }
-    );
-
-    ApiService.getTasks(job.id)
-      .then(fetchedTasks => setTasks(fetchedTasks))
-      .catch(error => console.error('Failed to fetch tasks:', error));
-
-    return () => {
-      unsubscribeTask();
-      unsubscribeSubTask();
-    };
-  }, [job.id]);
+  const [expanded, setExpanded] = useState(false);
 
   return (
     <div className="bg-white shadow-md p-6 border border-gray-200">
@@ -121,7 +61,19 @@ export function JobCard({ job }: JobCardProps) {
       )}
 
       <div className="mt-4">
-        <TaskCard jobId={job.id} tasks={tasks} />
+        <button
+          onClick={() => setExpanded(prev => !prev)}
+          className="text-sm font-medium mb-2 flex items-center"
+        >
+          <span className="mr-1">{expanded ? '▼' : '▶'}</span>
+          <span>Tasks</span>
+        </button>
+        
+        {expanded && (
+          <div className="mt-2">
+            <TaskCard jobId={job.id} />
+          </div>
+        )}
       </div>
     </div>
   );

@@ -31,7 +31,7 @@ function App() {
             status: status as JobStatus,
             result: result || newJobs[jobIndex].result
           };
-          return newJobs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+          return newJobs;
         }
       });
     });

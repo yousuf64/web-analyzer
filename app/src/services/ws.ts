@@ -15,7 +15,7 @@ interface TaskStatusUpdateMessage {
 }
 
 interface SubTaskStatusUpdateMessage {
-  type: 'subtask.status_update';
+  type: 'task.subtask_status_update';
   job_id: string;
   task_type: TaskType;
   key: string;
@@ -29,7 +29,7 @@ type JobUpdateCallback = (jobId: string, status: JobStatus, result?: AnalyzeResu
 type TaskUpdateCallback = (jobId: string, taskType: TaskType, status: TaskStatus) => void;
 type SubTaskUpdateCallback = (jobId: string, taskType: TaskType, key: string, status: TaskStatus, url?: string) => void;
 
-const WS_URL = 'ws://localhost:8080/ws';
+const WS_URL = 'ws://localhost:8081/ws';
 
 class WebSocketService {
   private ws: WebSocket | null = null;
@@ -37,6 +37,7 @@ class WebSocketService {
   private jobUpdateCallbacks: Set<JobUpdateCallback> = new Set();
   private taskUpdateCallbacks: Set<TaskUpdateCallback> = new Set();
   private subTaskUpdateCallbacks: Set<SubTaskUpdateCallback> = new Set();
+  private subscribedJobIds: Set<string> = new Set();
 
   connect() {
     if (this.ws || this.isConnecting) {
@@ -49,6 +50,11 @@ class WebSocketService {
     this.ws.onopen = () => {
       this.isConnecting = false;
       console.log("WebSocket connection established.");
+      
+      // Re-subscribe to all job IDs after reconnection
+      this.subscribedJobIds.forEach(jobId => {
+        this.sendSubscriptionMessage('subscribe', jobId);
+      });
     };
 
     this.ws.onmessage = (event) => {
@@ -66,7 +72,7 @@ class WebSocketService {
               callback(message.job_id, message.task_type, message.status)
             );
             break;
-          case 'subtask.status_update':
+          case 'task.subtask_status_update':
             this.subTaskUpdateCallbacks.forEach(callback =>
               callback(message.job_id, message.task_type, message.key, message.status, message.url)
             );
@@ -109,6 +115,41 @@ class WebSocketService {
   subscribeToSubTaskUpdates(callback: SubTaskUpdateCallback) {
     this.subTaskUpdateCallbacks.add(callback);
     return () => this.subTaskUpdateCallbacks.delete(callback);
+  }
+
+  subscribeToJob(jobId: string) {
+    if (this.subscribedJobIds.has(jobId)) {
+      return; // Already subscribed
+    }
+
+    this.subscribedJobIds.add(jobId);
+    
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.sendSubscriptionMessage('subscribe', jobId);
+    }
+  }
+
+  unsubscribeFromJob(jobId: string) {
+    if (!this.subscribedJobIds.has(jobId)) {
+      return; // Not subscribed
+    }
+
+    this.subscribedJobIds.delete(jobId);
+    
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.sendSubscriptionMessage('unsubscribe', jobId);
+    }
+  }
+
+  private sendSubscriptionMessage(action: 'subscribe' | 'unsubscribe', jobId: string) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      const message = {
+        action,
+        job_id: jobId
+      };
+      this.ws.send(JSON.stringify(message));
+      console.log(`${action} to job ${jobId}`);
+    }
   }
 }
 

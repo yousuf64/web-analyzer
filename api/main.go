@@ -4,139 +4,17 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"shared/messagebus"
 	"shared/repository"
 	"shared/types"
-	"slices"
 	"strconv"
-	"sync"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"github.com/nats-io/nats.go"
 	"github.com/yousuf64/shift"
 )
 
 var jobRepo *repository.JobRepository
 var taskRepo *repository.TaskRepository
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
-}
-
-type WSConnection struct {
-	conn   *websocket.Conn
-	jobIDs []string
-}
-
-var (
-	wsConnections = make(map[*WSConnection]bool)
-	wsLock        sync.RWMutex
-)
-
-func broadcastToUsers(message any) {
-	jsonMessage, err := json.Marshal(message)
-	if err != nil {
-		log.Printf("Failed to marshal message: %v", err)
-		return
-	}
-
-	wsLock.RLock()
-	defer wsLock.RUnlock()
-
-	var msgJobID string
-	switch m := message.(type) {
-	case messagebus.TaskStatusUpdateMessage:
-		msgJobID = m.JobID
-	case messagebus.SubTaskStatusUpdateMessage:
-		msgJobID = m.JobID
-	case messagebus.JobUpdateMessage:
-		msgJobID = "" // Broadcast to all connections
-	default:
-		// Broadcast to all connections
-	}
-
-	for conn := range wsConnections {
-		if msgJobID != "" && !slices.Contains(conn.jobIDs, msgJobID) {
-			continue
-		}
-
-		err := conn.conn.WriteMessage(websocket.TextMessage, jsonMessage)
-		if err != nil {
-			log.Printf("Failed to write to websocket: %v", err)
-		}
-	}
-}
-
-func setupSubscriptions(nc *nats.Conn) {
-	mb := messagebus.New(nc)
-	mb.SubscribeToJobUpdate(func(msg *nats.Msg) {
-		var m messagebus.JobUpdateMessage
-		if err := json.Unmarshal(msg.Data, &m); err != nil {
-			log.Printf("Failed to unmarshal job update: %v", err)
-			return
-		}
-		broadcastToUsers(m)
-	})
-
-	mb.SubscribeToTaskStatusUpdate(func(msg *nats.Msg) {
-		var m messagebus.TaskStatusUpdateMessage
-		if err := json.Unmarshal(msg.Data, &m); err != nil {
-			log.Printf("Failed to unmarshal task update: %v", err)
-			return
-		}
-		broadcastToUsers(m)
-	})
-
-	mb.SubscribeToSubTaskStatusUpdate(func(msg *nats.Msg) {
-		var m messagebus.SubTaskStatusUpdateMessage
-		if err := json.Unmarshal(msg.Data, &m); err != nil {
-			log.Printf("Failed to unmarshal subtask update: %v", err)
-			return
-		}
-		broadcastToUsers(m)
-	})
-}
-
-func handleWebSocket(w http.ResponseWriter, r *http.Request, route shift.Route) error {
-	jobID := route.Params.Get("job_id")
-
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Printf("Failed to upgrade websocket connection: %v", err)
-		return err
-	}
-	defer conn.Close()
-
-	wsConn := &WSConnection{
-		conn:   conn,
-		jobIDs: []string{jobID},
-	}
-
-	// Add the connection to the map
-	wsLock.Lock()
-	wsConnections[wsConn] = true
-	wsLock.Unlock()
-
-	// Remove the connection from the map on return
-	defer func() {
-		wsLock.Lock()
-		delete(wsConnections, wsConn)
-		wsLock.Unlock()
-	}()
-
-	for {
-		if _, _, err := conn.ReadMessage(); err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("unexpected websocket close error: %v", err)
-			}
-			break
-		}
-	}
-
-	return nil
-}
 
 func corsMiddleware(next shift.HandlerFunc) shift.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request, route shift.Route) error {
@@ -182,8 +60,6 @@ func main() {
 		log.Fatalf("Failed to connect to NATS: %v", err)
 	}
 	defer nc.Close()
-
-	setupSubscriptions(nc)
 
 	router := shift.New()
 	router.Use(corsMiddleware)
@@ -282,9 +158,6 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		return json.NewEncoder(w).Encode(tasks)
 	})
-
-	router.GET("/ws", handleWebSocket)
-	router.GET("/ws/:job_id", handleWebSocket)
 
 	log.Printf("API server listening on :8080")
 	log.Fatal(http.ListenAndServe(":8080", router.Serve()))
