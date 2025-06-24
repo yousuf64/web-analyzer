@@ -17,6 +17,11 @@ const (
 	SubTaskStatusUpdateMessageType MessageType = "task.subtask_status_update"
 )
 
+type AnalyzeMessage struct {
+	Type  MessageType `json:"type"`
+	JobId string      `json:"job_id"`
+}
+
 type JobUpdateMessage struct {
 	Type   MessageType          `json:"type"`
 	JobID  string               `json:"job_id"`
@@ -46,6 +51,17 @@ type MessageBus struct {
 
 func New(nc *nats.Conn) *MessageBus {
 	return &MessageBus{nc: nc}
+}
+
+func (b *MessageBus) PublishAnalyzeMessage(m AnalyzeMessage) error {
+	m.Type = AnalyzeMessageType
+	data, err := json.Marshal(m)
+	if err != nil {
+		log.Printf("Failed to marshal analyze message: %v", err)
+		return err
+	}
+
+	return b.nc.Publish(string(AnalyzeMessageType), data)
 }
 
 func (b *MessageBus) PublishJobUpdate(m JobUpdateMessage) error {

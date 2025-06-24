@@ -1,13 +1,20 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
-	"log"
+	"errors"
+	"log/slog"
 	"net/http"
+	"os"
+	"os/signal"
+	"shared/log"
+	"shared/messagebus"
 	"shared/repository"
 	"shared/types"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -15,8 +22,11 @@ import (
 	"github.com/yousuf64/shift"
 )
 
-var jobRepo *repository.JobRepository
-var taskRepo *repository.TaskRepository
+var (
+	jobRepo  *repository.JobRepository
+	taskRepo *repository.TaskRepository
+	logger   *slog.Logger
+)
 
 func corsMiddleware(next shift.HandlerFunc) shift.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request, route shift.Route) error {
@@ -33,7 +43,11 @@ func errorMiddleware(next shift.HandlerFunc) shift.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request, route shift.Route) error {
 		err := next(w, r, route)
 		if err != nil {
-			log.Printf("Error: %v", err)
+			logger.Error("Request error",
+				slog.String("method", r.Method),
+				slog.String("path", r.URL.Path),
+				slog.Any("error", err))
+
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 		return err
@@ -41,27 +55,36 @@ func errorMiddleware(next shift.HandlerFunc) shift.HandlerFunc {
 }
 
 func main() {
+	logger = log.SetupFromEnv("api")
+	logger.Info("Starting API service")
+
 	dynamodb, err := repository.NewDynamoDBClient()
 	if err != nil {
-		log.Fatalf("Failed to create DynamoDB client %v", err)
+		logger.Error("Failed to create DynamoDB client", slog.Any("error", err))
+		os.Exit(1)
 	}
 	repository.SeedTables(dynamodb)
 
 	jobRepo, err = repository.NewJobRepository()
 	if err != nil {
-		log.Fatalf("Failed to create job repo %v", err)
+		logger.Error("Failed to create job repository", slog.Any("error", err))
+		os.Exit(1)
 	}
 
 	taskRepo, err = repository.NewTaskRepository()
 	if err != nil {
-		log.Fatalf("Failed to create task repo %v", err)
+		logger.Error("Failed to create task repository", slog.Any("error", err))
+		os.Exit(1)
 	}
 
 	nc, err := nats.Connect(nats.DefaultURL)
 	if err != nil {
-		log.Fatalf("Failed to connect to NATS: %v", err)
+		logger.Error("Failed to connect to NATS", slog.Any("error", err))
+		os.Exit(1)
 	}
 	defer nc.Close()
+
+	mb := messagebus.New(nc)
 
 	router := shift.New()
 	router.Use(corsMiddleware)
@@ -76,57 +99,39 @@ func main() {
 	router.POST("/analyze", func(w http.ResponseWriter, r *http.Request, route shift.Route) error {
 		var req types.AnalyzeRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			return err
+			return errors.Join(err, errors.New("failed to decode request"))
 		}
 
 		jobId := generateId()
+		logger.Info("Creating new analysis job",
+			slog.String("jobId", jobId),
+			slog.String("url", req.Url))
 
 		job := &types.Job{
 			ID:        jobId,
 			URL:       req.Url,
 			Status:    types.JobStatusPending,
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
 		}
-		err := jobRepo.CreateJob(job)
-
-		if err != nil {
-			return err
+		if err := jobRepo.CreateJob(job); err != nil {
+			return errors.Join(err, errors.New("failed to create job"))
 		}
 
-		err = taskRepo.CreateTasks(&types.Task{
-			JobID:  jobId,
-			Type:   types.TaskTypeExtracting,
-			Status: types.TaskStatusPending,
-		}, &types.Task{
-			JobID:  jobId,
-			Type:   types.TaskTypeIdentifyingVersion,
-			Status: types.TaskStatusPending,
-		}, &types.Task{
-			JobID:  jobId,
-			Type:   types.TaskTypeAnalyzing,
-			Status: types.TaskStatusPending,
-		}, &types.Task{
-			JobID:  jobId,
-			Type:   types.TaskTypeVerifyingLinks,
-			Status: types.TaskStatusPending,
-		})
-		if err != nil {
-			return err
+		if err := taskRepo.CreateTasks(getDefaultTasks(jobId)...); err != nil {
+			return errors.Join(err, errors.New("failed to create tasks"))
 		}
 
-		msg, err := json.Marshal(types.AnalyzeMessage{
+		if err := mb.PublishAnalyzeMessage(messagebus.AnalyzeMessage{
+			Type:  messagebus.AnalyzeMessageType,
 			JobId: jobId,
-		})
-		if err != nil {
-			return err
+		}); err != nil {
+			return errors.Join(err, errors.New("failed to publish analyze message"))
 		}
 
-		err = nc.Publish("url.analyze", msg)
-		if err != nil {
-			return err
-		}
-		log.Printf("Message published: %v", req)
+		logger.Info("Analysis request published",
+			slog.String("jobId", jobId),
+			slog.String("url", req.Url))
 
 		w.WriteHeader(http.StatusAccepted)
 		return json.NewEncoder(w).Encode(types.AnalyzeResponse{
@@ -137,8 +142,7 @@ func main() {
 	router.GET("/jobs", func(w http.ResponseWriter, r *http.Request, route shift.Route) error {
 		jobs, err := jobRepo.GetAllJobs()
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return err
+			return errors.Join(err, errors.New("failed to get jobs"))
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -148,22 +152,46 @@ func main() {
 	router.GET("/jobs/:job_id/tasks", func(w http.ResponseWriter, r *http.Request, route shift.Route) error {
 		jobId := route.Params.Get("job_id")
 		if jobId == "" {
-			http.Error(w, "Job ID is required", http.StatusBadRequest)
-			return nil
+			return errors.New("job_id is required")
 		}
 
 		tasks, err := taskRepo.GetTasksByJobId(jobId)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return err
+			return errors.Join(err, errors.New("failed to get tasks"))
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		return json.NewEncoder(w).Encode(tasks)
 	})
 
-	log.Printf("API server listening on :8080")
-	log.Fatal(http.ListenAndServe(":8080", router.Serve()))
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: router.Serve(),
+	}
+
+	go func() {
+		logger.Info("API server listening on :8080")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("Server error", slog.Any("error", err))
+			os.Exit(1)
+		}
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	sig := <-sigCh
+
+	logger.Info("Shutting down API service", slog.String("signal", sig.String()))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		logger.Error("Server forced to shutdown", slog.Any("error", err))
+		os.Exit(1)
+	}
+
+	logger.Info("Server gracefully stopped")
 }
 
 // entropyPool provides a pool of monotonic entropy sources for ULID generation
@@ -182,4 +210,29 @@ func generateId() string {
 
 	entropyPool.Put(e)
 	return id.String()
+}
+
+func getDefaultTasks(jobId string) []*types.Task {
+	return []*types.Task{
+		{
+			JobID:  jobId,
+			Type:   types.TaskTypeExtracting,
+			Status: types.TaskStatusPending,
+		},
+		{
+			JobID:  jobId,
+			Type:   types.TaskTypeIdentifyingVersion,
+			Status: types.TaskStatusPending,
+		},
+		{
+			JobID:  jobId,
+			Type:   types.TaskTypeAnalyzing,
+			Status: types.TaskStatusPending,
+		},
+		{
+			JobID:  jobId,
+			Type:   types.TaskTypeVerifyingLinks,
+			Status: types.TaskStatusPending,
+		},
+	}
 }

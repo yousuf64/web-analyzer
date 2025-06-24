@@ -2,10 +2,11 @@ package main
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"shared/log"
 	"shared/messagebus"
 	"slices"
 	"sync"
@@ -30,6 +31,8 @@ type WSConnection struct {
 var (
 	wsConnections = make(map[*WSConnection]bool)
 	wsLock        sync.RWMutex
+	subscriptions []*nats.Subscription
+	logger        *slog.Logger
 )
 
 func (wsc *WSConnection) addGroup(group string) {
@@ -60,7 +63,7 @@ func (wsc *WSConnection) hasGroup(group string) bool {
 func broadcastToUsers(message any, group string) {
 	jsonMessage, err := json.Marshal(message)
 	if err != nil {
-		log.Printf("Failed to marshal message: %v", err)
+		logger.Error("Failed to marshal message", slog.Any("error", err))
 		return
 	}
 
@@ -75,7 +78,7 @@ func broadcastToUsers(message any, group string) {
 
 		err := conn.conn.WriteMessage(websocket.TextMessage, jsonMessage)
 		if err != nil {
-			log.Printf("Failed to write to websocket: %v", err)
+			logger.Error("Failed to write to websocket", slog.Any("error", err))
 			// Remove connection on error
 			go func(c *WSConnection) {
 				wsLock.Lock()
@@ -90,43 +93,58 @@ func broadcastToUsers(message any, group string) {
 func setupSubscriptions(nc *nats.Conn) {
 	mb := messagebus.New(nc)
 
-	mb.SubscribeToJobUpdate(func(msg *nats.Msg) {
+	sub, err := mb.SubscribeToJobUpdate(func(msg *nats.Msg) {
 		var m messagebus.JobUpdateMessage
 		if err := json.Unmarshal(msg.Data, &m); err != nil {
-			log.Printf("Failed to unmarshal job update: %v", err)
+			logger.Error("Failed to unmarshal job update", slog.Any("error", err))
 			return
 		}
-		log.Printf("Broadcasting job update for job %s", m.JobID)
+		logger.Info("Broadcasting job update for job", slog.String("jobId", m.JobID))
 		broadcastToUsers(m, "")
 	})
+	if err != nil {
+		logger.Error("Failed to subscribe to job update", slog.Any("error", err))
+		os.Exit(1)
+	}
+	subscriptions = append(subscriptions, sub)
 
-	mb.SubscribeToTaskStatusUpdate(func(msg *nats.Msg) {
+	sub, err = mb.SubscribeToTaskStatusUpdate(func(msg *nats.Msg) {
 		var m messagebus.TaskStatusUpdateMessage
 		if err := json.Unmarshal(msg.Data, &m); err != nil {
-			log.Printf("Failed to unmarshal task update: %v", err)
+			logger.Error("Failed to unmarshal task update", slog.Any("error", err))
 			return
 		}
 
-		log.Printf("Broadcasting task status update for job %s to group %s", m.JobID, m.JobID)
+		logger.Info("Broadcasting task status update for job", slog.String("jobId", m.JobID))
 		broadcastToUsers(m, m.JobID)
 	})
+	if err != nil {
+		logger.Error("Failed to subscribe to task status update", slog.Any("error", err))
+		os.Exit(1)
+	}
+	subscriptions = append(subscriptions, sub)
 
-	mb.SubscribeToSubTaskStatusUpdate(func(msg *nats.Msg) {
+	sub, err = mb.SubscribeToSubTaskStatusUpdate(func(msg *nats.Msg) {
 		var m messagebus.SubTaskStatusUpdateMessage
 		if err := json.Unmarshal(msg.Data, &m); err != nil {
-			log.Printf("Failed to unmarshal subtask update: %v", err)
+			logger.Error("Failed to unmarshal subtask update", slog.Any("error", err))
 			return
 		}
 
-		log.Printf("Broadcasting subtask status update for job %s to group %s", m.JobID, m.JobID)
+		logger.Info("Broadcasting subtask status update for job", slog.String("jobId", m.JobID))
 		broadcastToUsers(m, m.JobID)
 	})
+	if err != nil {
+		logger.Error("Failed to subscribe to subtask status update", slog.Any("error", err))
+		os.Exit(1)
+	}
+	subscriptions = append(subscriptions, sub)
 }
 
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("Failed to upgrade websocket connection: %v", err)
+		logger.Error("Failed to upgrade websocket connection", slog.Any("error", err))
 		return
 	}
 	defer conn.Close()
@@ -141,21 +159,21 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	wsConnections[wsConn] = true
 	wsLock.Unlock()
 
-	log.Println("New WebSocket connection established")
+	logger.Info("New WebSocket connection established")
 
 	// Remove the connection from the map on return
 	defer func() {
 		wsLock.Lock()
 		delete(wsConnections, wsConn)
 		wsLock.Unlock()
-		log.Println("WebSocket connection closed")
+		logger.Info("WebSocket connection closed")
 	}()
 
 	for {
 		messageType, p, err := conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("unexpected websocket close error: %v", err)
+				logger.Error("Unexpected websocket close error", slog.Any("error", err))
 			}
 			break
 		}
@@ -171,11 +189,11 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				switch subscriptionUpdate.Action {
 				case "subscribe":
 					wsConn.addGroup(subscriptionUpdate.Group)
-					log.Printf("Added subscription for group: %s", subscriptionUpdate.Group)
+					logger.Info("Added subscription for group", slog.String("group", subscriptionUpdate.Group))
 
 				case "unsubscribe":
 					wsConn.removeGroup(subscriptionUpdate.Group)
-					log.Printf("Removed subscription for group: %s", subscriptionUpdate.Group)
+					logger.Info("Removed subscription for group", slog.String("group", subscriptionUpdate.Group))
 
 				}
 			}
@@ -200,9 +218,13 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func main() {
+	logger = log.SetupFromEnv("notifications")
+	logger.Info("Starting notifications service")
+
 	nc, err := nats.Connect(nats.DefaultURL)
 	if err != nil {
-		log.Fatalf("Failed to connect to NATS: %v", err)
+		logger.Error("Failed to connect to NATS", slog.Any("error", err))
+		os.Exit(1)
 	}
 	defer nc.Close()
 
@@ -211,17 +233,23 @@ func main() {
 	http.HandleFunc("/ws", corsMiddleware(handleWebSocket))
 
 	go func() {
-		log.Printf("Notification backplane listening on :8081")
+		logger.Info("Notification backplane listening on :8081")
 		if err := http.ListenAndServe(":8081", nil); err != nil {
-			log.Fatalf("Failed to listen: %v", err)
+			logger.Error("Failed to listen", slog.Any("error", err))
+			os.Exit(1)
 		}
 	}()
 
-	log.Println("Notification backplane service is running...")
+	logger.Info("Notification backplane service is running...")
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
 
-	log.Println("Shutting down notification backplane...")
+	logger.Info("Unsubscribing from NATS", slog.Int("subscriptionCount", len(subscriptions)))
+	for _, sub := range subscriptions {
+		sub.Unsubscribe()
+	}
+
+	logger.Info("Shutting down notification backplane...")
 }
