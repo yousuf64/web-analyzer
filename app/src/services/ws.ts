@@ -37,7 +37,7 @@ class WebSocketService {
   private jobUpdateCallbacks: Set<JobUpdateCallback> = new Set();
   private taskUpdateCallbacks: Set<TaskUpdateCallback> = new Set();
   private subTaskUpdateCallbacks: Set<SubTaskUpdateCallback> = new Set();
-  private subscribedJobIds: Set<string> = new Set();
+  private subscribedGroups: Set<string> = new Set();
 
   connect() {
     if (this.ws || this.isConnecting) {
@@ -51,9 +51,9 @@ class WebSocketService {
       this.isConnecting = false;
       console.log("WebSocket connection established.");
       
-      // Re-subscribe to all job IDs after reconnection
-      this.subscribedJobIds.forEach(jobId => {
-        this.sendSubscriptionMessage('subscribe', jobId);
+      // Re-subscribe to all groups after reconnection
+      this.subscribedGroups.forEach(group => {
+        this.sendSubscriptionMessage('subscribe', group);
       });
     };
 
@@ -116,39 +116,39 @@ class WebSocketService {
     this.subTaskUpdateCallbacks.add(callback);
     return () => this.subTaskUpdateCallbacks.delete(callback);
   }
-
-  subscribeToJob(jobId: string) {
-    if (this.subscribedJobIds.has(jobId)) {
+  
+  subscribeToGroup(group: string) {
+    if (this.subscribedGroups.has(group)) {
       return; // Already subscribed
     }
 
-    this.subscribedJobIds.add(jobId);
+    this.subscribedGroups.add(group);
     
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.sendSubscriptionMessage('subscribe', jobId);
+      this.sendSubscriptionMessage('subscribe', group);
     }
   }
 
-  unsubscribeFromJob(jobId: string) {
-    if (!this.subscribedJobIds.has(jobId)) {
+  unsubscribeFromGroup(group: string) {
+    if (!this.subscribedGroups.has(group)) {
       return; // Not subscribed
     }
 
-    this.subscribedJobIds.delete(jobId);
+    this.subscribedGroups.delete(group);
     
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.sendSubscriptionMessage('unsubscribe', jobId);
+      this.sendSubscriptionMessage('unsubscribe', group);
     }
   }
 
-  private sendSubscriptionMessage(action: 'subscribe' | 'unsubscribe', jobId: string) {
+  private sendSubscriptionMessage(action: 'subscribe' | 'unsubscribe', group: string) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       const message = {
         action,
-        job_id: jobId
+        group
       };
       this.ws.send(JSON.stringify(message));
-      console.log(`${action} to job ${jobId}`);
+      console.log(`${action} to group ${group}`);
     }
   }
 }

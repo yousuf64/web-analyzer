@@ -1,8 +1,6 @@
-import { useEffect, useState } from 'react';
-import type { Job, Task } from '../types';
+import { useState } from 'react';
+import type { Job } from '../types';
 import { TaskCard } from './TaskCard';
-import { ApiService } from '../services/api';
-import { webSocketService } from '../services/ws';
 
 interface JobCardProps {
   job: Job;

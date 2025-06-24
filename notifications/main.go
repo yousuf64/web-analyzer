@@ -23,7 +23,7 @@ var upgrader = websocket.Upgrader{
 
 type WSConnection struct {
 	conn   *websocket.Conn
-	jobIDs []string
+	groups []string
 	mu     sync.RWMutex
 }
 
@@ -32,21 +32,32 @@ var (
 	wsLock        sync.RWMutex
 )
 
-func (wsc *WSConnection) addJobID(jobID string) {
+func (wsc *WSConnection) addGroup(group string) {
 	wsc.mu.Lock()
 	defer wsc.mu.Unlock()
-	if !slices.Contains(wsc.jobIDs, jobID) {
-		wsc.jobIDs = append(wsc.jobIDs, jobID)
+	if !slices.Contains(wsc.groups, group) {
+		wsc.groups = append(wsc.groups, group)
 	}
 }
 
-func (wsc *WSConnection) hasJobID(jobID string) bool {
-	wsc.mu.RLock()
-	defer wsc.mu.RUnlock()
-	return slices.Contains(wsc.jobIDs, jobID)
+func (wsc *WSConnection) removeGroup(group string) {
+	wsc.mu.Lock()
+	defer wsc.mu.Unlock()
+	for i, g := range wsc.groups {
+		if g == group {
+			wsc.groups = append(wsc.groups[:i], wsc.groups[i+1:]...)
+			break
+		}
+	}
 }
 
-func broadcastToUsers(message any) {
+func (wsc *WSConnection) hasGroup(group string) bool {
+	wsc.mu.RLock()
+	defer wsc.mu.RUnlock()
+	return slices.Contains(wsc.groups, group)
+}
+
+func broadcastToUsers(message any, group string) {
 	jsonMessage, err := json.Marshal(message)
 	if err != nil {
 		log.Printf("Failed to marshal message: %v", err)
@@ -56,23 +67,9 @@ func broadcastToUsers(message any) {
 	wsLock.RLock()
 	defer wsLock.RUnlock()
 
-	var msgJobID string
-	switch m := message.(type) {
-	case messagebus.TaskStatusUpdateMessage:
-		msgJobID = m.JobID
-	case messagebus.SubTaskStatusUpdateMessage:
-		msgJobID = m.JobID
-	case messagebus.JobUpdateMessage:
-		// Broadcast to all connections if no specific job ID
-		msgJobID = ""
-	default:
-		// Broadcast to all connections if no specific job ID
-		msgJobID = ""
-	}
-
 	for conn := range wsConnections {
-		// If message has a specific job ID, only send to connections subscribed to that job
-		if msgJobID != "" && !conn.hasJobID(msgJobID) {
+		// If a group is specified, only send to connections subscribed to that group
+		if group != "" && !conn.hasGroup(group) {
 			continue
 		}
 
@@ -99,8 +96,8 @@ func setupSubscriptions(nc *nats.Conn) {
 			log.Printf("Failed to unmarshal job update: %v", err)
 			return
 		}
-		log.Printf("Broadcasting job update: %+v", m)
-		broadcastToUsers(m)
+		log.Printf("Broadcasting job update for job %s", m.JobID)
+		broadcastToUsers(m, "")
 	})
 
 	mb.SubscribeToTaskStatusUpdate(func(msg *nats.Msg) {
@@ -109,8 +106,9 @@ func setupSubscriptions(nc *nats.Conn) {
 			log.Printf("Failed to unmarshal task update: %v", err)
 			return
 		}
-		log.Printf("Broadcasting task status update: %+v", m)
-		broadcastToUsers(m)
+
+		log.Printf("Broadcasting task status update for job %s to group %s", m.JobID, m.JobID)
+		broadcastToUsers(m, m.JobID)
 	})
 
 	mb.SubscribeToSubTaskStatusUpdate(func(msg *nats.Msg) {
@@ -119,8 +117,9 @@ func setupSubscriptions(nc *nats.Conn) {
 			log.Printf("Failed to unmarshal subtask update: %v", err)
 			return
 		}
-		log.Printf("Broadcasting subtask status update: %+v", m)
-		broadcastToUsers(m)
+
+		log.Printf("Broadcasting subtask status update for job %s to group %s", m.JobID, m.JobID)
+		broadcastToUsers(m, m.JobID)
 	})
 }
 
@@ -134,7 +133,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	wsConn := &WSConnection{
 		conn:   conn,
-		jobIDs: []string{},
+		groups: []string{},
 	}
 
 	// Add the connection to the map
@@ -165,24 +164,19 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		if messageType == websocket.TextMessage {
 			var subscriptionUpdate struct {
 				Action string `json:"action"`
-				JobID  string `json:"job_id"`
+				Group  string `json:"group"`
 			}
 
 			if err := json.Unmarshal(p, &subscriptionUpdate); err == nil {
 				switch subscriptionUpdate.Action {
 				case "subscribe":
-					wsConn.addJobID(subscriptionUpdate.JobID)
-					log.Printf("Added subscription for job ID: %s", subscriptionUpdate.JobID)
+					wsConn.addGroup(subscriptionUpdate.Group)
+					log.Printf("Added subscription for group: %s", subscriptionUpdate.Group)
+
 				case "unsubscribe":
-					wsConn.mu.Lock()
-					for i, id := range wsConn.jobIDs {
-						if id == subscriptionUpdate.JobID {
-							wsConn.jobIDs = append(wsConn.jobIDs[:i], wsConn.jobIDs[i+1:]...)
-							break
-						}
-					}
-					wsConn.mu.Unlock()
-					log.Printf("Removed subscription for job ID: %s", subscriptionUpdate.JobID)
+					wsConn.removeGroup(subscriptionUpdate.Group)
+					log.Printf("Removed subscription for group: %s", subscriptionUpdate.Group)
+
 				}
 			}
 		}

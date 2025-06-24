@@ -41,7 +41,7 @@ export function TaskCard({ jobId }: TaskCardProps) {
 
   useEffect(() => {
     webSocketService.connect();
-    webSocketService.subscribeToJob(jobId);
+    webSocketService.subscribeToGroup(jobId);
 
     const unsubscribeTask = webSocketService.subscribeToTaskUpdates((updatedJobId, taskType, status) => {
       if (updatedJobId === jobId) {
@@ -109,7 +109,7 @@ export function TaskCard({ jobId }: TaskCardProps) {
     return () => {
       unsubscribeTask();
       unsubscribeSubTask();
-      webSocketService.unsubscribeFromJob(jobId);
+      webSocketService.unsubscribeFromGroup(jobId);
     };
   }, [jobId]);
 
