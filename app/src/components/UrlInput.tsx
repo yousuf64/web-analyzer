@@ -1,13 +1,15 @@
 import { useState } from 'react';
+import { ApiService } from '../services/api';
+import type { Job } from '../types';
 
 interface UrlInputProps {
-  onSubmit: (url: string) => Promise<void>;
-  isLoading: boolean;
+  onJobCreated: (job: Job) => void;
 }
 
-export function UrlInput({ onSubmit, isLoading }: UrlInputProps) {
+export function UrlInput({ onJobCreated }: UrlInputProps) {
   const [url, setUrl] = useState('');
-  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,42 +28,41 @@ export function UrlInput({ onSubmit, isLoading }: UrlInputProps) {
     }
 
     try {
-      await onSubmit(url);
+      const response = await ApiService.createAnalyzeJob(url);
+      onJobCreated(response.job);
       setUrl('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ran into an error while starting the analysis');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to create job');
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="bg-white shadow-md p-6 border border-gray-200">
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label htmlFor="url" className="block font-medium mb-2">
-            Link to analyze
-          </label>
-          <input
-            type="url"
-            id="url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://google.com"
-            className="w-full px-3 py-2 border border-gray-300 shadow-sm focus:outline-none focus:ring-2"
-            disabled={isLoading}
-          />
-          {error && (
-            <p className="mt-1 text-sm text-red-600">{error}</p>
-          )}
-        </div>
-
+    <form onSubmit={handleSubmit} className="flex flex-col gap-2">
+      <div className="flex gap-2">
+        <input
+          type="url"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="Enter URL to analyze"
+          className="flex-1 px-3 py-2 border"
+          required
+          disabled={loading}
+        />
         <button
           type="submit"
-          disabled={isLoading}
-          className="w-full bg-blue-500 text-white py-2 px-4 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={loading}
+          className="px-4 py-2 bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50"
         >
-          {isLoading ? 'Analyzing...' : 'Analyze'}
+          {loading ? 'Analyzing...' : 'Analyze'}
         </button>
-      </form>
-    </div>
+      </div>
+      {error && (
+        <div className="text-red-600 text-sm">
+          {error}
+        </div>
+      )}
+    </form>
   );
 } 

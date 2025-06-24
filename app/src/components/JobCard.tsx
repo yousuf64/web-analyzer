@@ -1,14 +1,75 @@
-import type { Job } from '../types';
+import { useEffect, useState } from 'react';
+import type { Job, Task } from '../types';
 import { TaskCard } from './TaskCard';
+import { ApiService } from '../services/api';
+import { webSocketService } from '../services/ws';
 
 interface JobCardProps {
   job: Job;
 }
 
 export function JobCard({ job }: JobCardProps) {
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString();
-  };
+  const [tasks, setTasks] = useState<Task[] | null>(null);
+
+  useEffect(() => {
+    const unsubscribeTask = webSocketService.subscribeToTaskUpdates((jobId, taskType, status) => {
+      if (jobId === job.id) {
+        setTasks(prevTasks => {
+          if (!prevTasks) return prevTasks;
+
+          return prevTasks.map(task => {
+            if (task.type === taskType) {
+              return { ...task, status: status };
+            }
+            return task;
+          });
+        });
+      }
+    });
+
+    const unsubscribeSubTask = webSocketService.subscribeToSubTaskUpdates(
+      (jobId, taskType, key, status, url) => {
+        if (jobId === job.id) {
+          setTasks(prevTasks => {
+            if (!prevTasks) return prevTasks;
+
+            return prevTasks.map(task => {
+              if (task.type === taskType) {
+                const updatedSubtasks = { ...task.subtasks };
+
+                if (!updatedSubtasks[key] && url) {
+                  // New subtask
+                  updatedSubtasks[key] = {
+                    type: 'validating_link',
+                    status: status,
+                    url
+                  };
+                } else if (updatedSubtasks[key]) {
+                  // Update existing subtask
+                  updatedSubtasks[key] = {
+                    ...updatedSubtasks[key],
+                    status: status
+                  };
+                }
+
+                return { ...task, subtasks: Object.fromEntries(Object.entries(updatedSubtasks).sort(([a], [b]) => a.localeCompare(b))) };
+              }
+              return task;
+            });
+          });
+        }
+      }
+    );
+
+    ApiService.getTasks(job.id)
+      .then(fetchedTasks => setTasks(fetchedTasks))
+      .catch(error => console.error('Failed to fetch tasks:', error));
+
+    return () => {
+      unsubscribeTask();
+      unsubscribeSubTask();
+    };
+  }, [job.id]);
 
   return (
     <div className="bg-white shadow-md p-6 border border-gray-200">
@@ -24,14 +85,14 @@ export function JobCard({ job }: JobCardProps) {
         <span
           className="text-sm font-medium"
         >
-          {job.status}
+          [{job.status}]
         </span>
       </div>
 
       <div className="text-sm mb-4">
-        <p>Created: {formatDate(job.created_at)}</p>
-        {job.started_at && <p>Started: {formatDate(job.started_at)}</p>}
-        {job.completed_at && <p>Completed: {formatDate(job.completed_at)}</p>}
+        <p>Created: {job.created_at.toLocaleString()}</p>
+        {job.started_at && <p>Started: {job.started_at.toLocaleString()}</p>}
+        {job.completed_at && <p>Completed: {job.completed_at.toLocaleString()}</p>}
       </div>
 
       {job.result && (
@@ -42,7 +103,7 @@ export function JobCard({ job }: JobCardProps) {
             <p><span>Page Title:</span> {job.result.page_title}</p>
             <p><span>Has Login Form:</span> {job.result.has_login_form ? 'Yes' : 'No'}</p>
             <p><span>Links Found:</span> {job.result.links.length}</p>
-            
+
             {Object.keys(job.result.headings).length > 0 && (
               <div>
                 <span>Headings:</span>
@@ -58,9 +119,9 @@ export function JobCard({ job }: JobCardProps) {
           </div>
         </div>
       )}
-      
+
       <div className="mt-4">
-        <TaskCard jobId={job.id} />
+        <TaskCard jobId={job.id} tasks={tasks} />
       </div>
     </div>
   );

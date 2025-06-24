@@ -2,10 +2,10 @@ export interface Job {
   id: string;
   url: string;
   status: JobStatus;
-  created_at: string;
-  updated_at: string;
-  started_at?: string;
-  completed_at?: string;
+  created_at: Date;
+  updated_at: Date;
+  started_at?: Date;
+  completed_at?: Date;
   result?: AnalyzeResult;
 }
 
@@ -24,7 +24,7 @@ export interface AnalyzeRequest {
 }
 
 export interface AnalyzeResponse {
-  job_id: string;
+  job: Job;
 }
 
 export interface Task {
@@ -50,7 +50,7 @@ export type TaskStatus =
 export interface SubTask {
   type: SubTaskType;
   status: TaskStatus;
-  url?: string;
+  url: string;
 }
 
 export type SubTaskType = 'validating_link'; 

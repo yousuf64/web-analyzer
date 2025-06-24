@@ -1,4 +1,4 @@
-import type { Job, AnalyzeRequest, AnalyzeResponse, Task } from './types';
+import type { Job, AnalyzeRequest, AnalyzeResponse, Task } from '../types';
 
 const BASE_URL = 'http://localhost:8080';
 
