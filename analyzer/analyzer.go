@@ -1,7 +1,8 @@
 package main
 
 import (
-	"log"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"shared/types"
@@ -49,9 +50,8 @@ func (a *Analyzer) AnalyzeHTML(content string) (types.AnalyzeResult, error) {
 	a.TaskStatusUpdateCallback(types.TaskTypeExtracting, types.TaskStatusPending)
 	doc, err := html.Parse(strings.NewReader(content))
 	if err != nil {
-		log.Printf("Failed to parse HTML: %v", err)
 		a.TaskStatusUpdateCallback(types.TaskTypeExtracting, types.TaskStatusFailed)
-		return types.AnalyzeResult{}, err
+		return types.AnalyzeResult{}, errors.Join(err, errors.New("failed to parse HTML"))
 	}
 	a.TaskStatusUpdateCallback(types.TaskTypeExtracting, types.TaskStatusCompleted)
 
@@ -150,20 +150,23 @@ func (a *Analyzer) dfsFormInputs(n *html.Node, hasPassword, hasEmail *bool) {
 }
 
 func (a *Analyzer) verifyLinks() {
-	log.Printf("Starting link verification for %d links", len(a.links))
-
-	if len(a.links) == 0 {
+	linkCount := len(a.links)
+	if linkCount == 0 {
 		return
 	}
 
-	var wg sync.WaitGroup
+	logger.Info("Starting link verification", slog.Int("linkCount", linkCount))
 
+	var wg sync.WaitGroup
 	semaphore := make(chan struct{}, maxConc)
 
 	for i, link := range a.links {
 		key := strconv.Itoa(i + 1)
 		a.AddSubTaskCallback(types.TaskTypeVerifyingLinks, key, link)
-		log.Printf("Added subtask for link verification: %s with key: %s", link, key)
+
+		logger.Debug("Added subtask for link verification",
+			slog.String("key", key),
+			slog.String("url", link))
 
 		wg.Add(1)
 		go func(link, key string) {
@@ -173,47 +176,57 @@ func (a *Analyzer) verifyLinks() {
 			defer func() { <-semaphore }()
 
 			a.SubTaskStatusUpdateCallback(types.TaskTypeVerifyingLinks, key, types.TaskStatusRunning)
-
-			status := a.verifyLink(a.hc, link)
-
+			status := a.verifyLink(link)
 			a.SubTaskStatusUpdateCallback(types.TaskTypeVerifyingLinks, key, status)
 		}(link, key)
 	}
 
 	wg.Wait()
-	log.Printf("Completed link verification for %d links", len(a.links))
+	logger.Info("Completed link verification", slog.Int("linkCount", linkCount))
 }
 
-func (a *Analyzer) verifyLink(client *http.Client, link string) types.TaskStatus {
+func (a *Analyzer) verifyLink(link string) types.TaskStatus {
 	parsedURL, err := url.Parse(link)
 	if err != nil {
-		log.Printf("Error parsing URL: %s, error: %v", link, err)
+		logger.Error("Error parsing URL",
+			slog.String("url", link),
+			slog.Any("error", err))
 		return types.TaskStatusFailed
 	}
 
 	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-		log.Printf("Skipping non-HTTP URL: %s", link)
+		logger.Debug("Skipping non-HTTP URL",
+			slog.String("url", link),
+			slog.String("scheme", parsedURL.Scheme))
 		return types.TaskStatusSkipped
 	}
 
 	req, err := http.NewRequest(http.MethodHead, link, nil)
 	if err != nil {
-		log.Printf("Failed to create request %s: %v", link, err)
+		logger.Error("Failed to create request",
+			slog.String("url", link),
+			slog.Any("error", err))
 		return types.TaskStatusFailed
 	}
 
-	resp, err := client.Do(req)
+	resp, err := a.hc.Do(req)
 	if err != nil {
-		log.Printf("Failed to verify link %s: %v", link, err)
+		logger.Error("Failed to verify link",
+			slog.String("url", link),
+			slog.Any("error", err))
 		return types.TaskStatusFailed
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
-		log.Printf("Link verified: %s, status: %d", link, resp.StatusCode)
+		logger.Debug("Link verified",
+			slog.String("url", link),
+			slog.Int("statusCode", resp.StatusCode))
 		return types.TaskStatusCompleted
 	}
 
-	log.Printf("Link verification failed: %s, status: %d", link, resp.StatusCode)
+	logger.Warn("Link verification failed",
+		slog.String("url", link),
+		slog.Int("statusCode", resp.StatusCode))
 	return types.TaskStatusFailed
 }
