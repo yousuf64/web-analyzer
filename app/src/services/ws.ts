@@ -1,4 +1,4 @@
-import type { AnalyzeResult, JobStatus, TaskStatus, TaskType } from "../types";
+import type { AnalyzeResult, JobStatus, SubTask, TaskStatus, TaskType } from "../types";
 
 interface JobUpdateMessage {
   type: 'job.update';
@@ -14,20 +14,19 @@ interface TaskStatusUpdateMessage {
   status: TaskStatus;
 }
 
-interface SubTaskStatusUpdateMessage {
-  type: 'task.subtask_status_update';
+interface SubTaskUpdateMessage {
+  type: 'task.subtask_update';
   job_id: string;
   task_type: TaskType;
   key: string;
-  status: TaskStatus;
-  url?: string;
+  subtask: SubTask;
 }
 
-type WebSocketMessage = JobUpdateMessage | TaskStatusUpdateMessage | SubTaskStatusUpdateMessage;
+type WebSocketMessage = JobUpdateMessage | TaskStatusUpdateMessage | SubTaskUpdateMessage;
 
 type JobUpdateCallback = (jobId: string, status: JobStatus, result?: AnalyzeResult) => void;
 type TaskUpdateCallback = (jobId: string, taskType: TaskType, status: TaskStatus) => void;
-type SubTaskUpdateCallback = (jobId: string, taskType: TaskType, key: string, status: TaskStatus, url?: string) => void;
+type SubTaskUpdateCallback = (jobId: string, taskType: TaskType, key: string, subtask: SubTask) => void;
 
 const WS_URL = 'ws://localhost:8081/ws';
 
@@ -72,9 +71,9 @@ class WebSocketService {
               callback(message.job_id, message.task_type, message.status)
             );
             break;
-          case 'task.subtask_status_update':
+          case 'task.subtask_update':
             this.subTaskUpdateCallbacks.forEach(callback =>
-              callback(message.job_id, message.task_type, message.key, message.status, message.url)
+              callback(message.job_id, message.task_type, message.key, message.subtask)
             );
             break;
           default:

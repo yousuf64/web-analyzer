@@ -11,10 +11,10 @@ import (
 type MessageType string
 
 const (
-	AnalyzeMessageType             MessageType = "url.analyze"
-	JobUpdateMessageType           MessageType = "job.update"
-	TaskStatusUpdateMessageType    MessageType = "task.status_update"
-	SubTaskStatusUpdateMessageType MessageType = "task.subtask_status_update"
+	AnalyzeMessageType          MessageType = "url.analyze"
+	JobUpdateMessageType        MessageType = "job.update"
+	TaskStatusUpdateMessageType MessageType = "task.status_update"
+	SubTaskUpdateMessageType    MessageType = "task.subtask_update"
 )
 
 type AnalyzeMessage struct {
@@ -36,13 +36,12 @@ type TaskStatusUpdateMessage struct {
 	Status   string      `json:"status"`
 }
 
-type SubTaskStatusUpdateMessage struct {
-	Type     MessageType `json:"type"`
-	JobID    string      `json:"job_id"`
-	TaskType string      `json:"task_type"`
-	Key      string      `json:"key"`
-	Status   string      `json:"status"`
-	URL      string      `json:"url,omitempty"`
+type SubTaskUpdateMessage struct {
+	Type     MessageType   `json:"type"`
+	JobID    string        `json:"job_id"`
+	TaskType string        `json:"task_type"`
+	Key      string        `json:"key"`
+	SubTask  types.SubTask `json:"subtask"`
 }
 
 type MessageBus struct {
@@ -96,16 +95,16 @@ func (b *MessageBus) PublishTaskStatusUpdate(m TaskStatusUpdateMessage) error {
 	return nil
 }
 
-func (b *MessageBus) PublishSubTaskStatusUpdate(m SubTaskStatusUpdateMessage) error {
-	m.Type = SubTaskStatusUpdateMessageType
+func (b *MessageBus) PublishSubTaskUpdate(m SubTaskUpdateMessage) error {
+	m.Type = SubTaskUpdateMessageType
 	data, err := json.Marshal(m)
 	if err != nil {
-		log.Printf("Failed to marshal subtask status update: %v", err)
+		log.Printf("Failed to marshal subtask update: %v", err)
 		return err
 	}
 
-	if err := b.nc.Publish(string(SubTaskStatusUpdateMessageType), data); err != nil {
-		log.Printf("Failed to publish subtask status update: %v", err)
+	if err := b.nc.Publish(string(SubTaskUpdateMessageType), data); err != nil {
+		log.Printf("Failed to publish subtask update: %v", err)
 		return err
 	}
 
@@ -124,6 +123,6 @@ func (b *MessageBus) SubscribeToTaskStatusUpdate(handler func(m *nats.Msg)) (*na
 	return b.nc.Subscribe(string(TaskStatusUpdateMessageType), handler)
 }
 
-func (b *MessageBus) SubscribeToSubTaskStatusUpdate(handler func(m *nats.Msg)) (*nats.Subscription, error) {
-	return b.nc.Subscribe(string(SubTaskStatusUpdateMessageType), handler)
+func (b *MessageBus) SubscribeToSubTaskUpdate(handler func(m *nats.Msg)) (*nats.Subscription, error) {
+	return b.nc.Subscribe(string(SubTaskUpdateMessageType), handler)
 }

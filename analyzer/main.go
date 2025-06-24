@@ -164,7 +164,7 @@ func analyze(am messagebus.AnalyzeMessage) (err error) {
 	an.SetBaseUrl(job.URL)
 	an.TaskStatusUpdateCallback = updateTaskStatus(am.JobId)
 	an.AddSubTaskCallback = addSubTask(am.JobId)
-	an.SubTaskStatusUpdateCallback = updateSubTaskStatus(am.JobId)
+	an.SubTaskUpdateCallback = updateSubTaskStatus(am.JobId)
 
 	res, err := an.AnalyzeHTML(c)
 	if err != nil {
@@ -239,11 +239,14 @@ func updateTaskStatus(jobId string) TaskStatusUpdateCallback {
 
 func addSubTask(jobId string) AddSubTaskCallback {
 	return func(taskType types.TaskType, key, url string) {
-		err := tsk.AddSubTaskByKey(jobId, taskType, key, types.SubTask{
-			Type:   types.SubTaskTypeValidatingLink,
-			Status: types.TaskStatusPending,
-			URL:    url,
-		})
+		subtask := types.SubTask{
+			Type:        types.SubTaskTypeValidatingLink,
+			Status:      types.TaskStatusPending,
+			URL:         url,
+			Description: "",
+		}
+
+		err := tsk.AddSubTaskByKey(jobId, taskType, key, subtask)
 		if err != nil {
 			logger.Error("Failed to add subtask",
 				slog.String("jobId", jobId),
@@ -254,13 +257,12 @@ func addSubTask(jobId string) AddSubTaskCallback {
 			return
 		}
 
-		if err := mb.PublishSubTaskStatusUpdate(messagebus.SubTaskStatusUpdateMessage{
-			Type:     messagebus.SubTaskStatusUpdateMessageType,
+		if err := mb.PublishSubTaskUpdate(messagebus.SubTaskUpdateMessage{
+			Type:     messagebus.SubTaskUpdateMessageType,
 			JobID:    jobId,
 			TaskType: string(taskType),
 			Key:      key,
-			Status:   string(types.TaskStatusPending),
-			URL:      url,
+			SubTask:  subtask,
 		}); err != nil {
 			logger.Error("Failed to publish subtask status update",
 				slog.String("jobId", jobId),
@@ -272,31 +274,35 @@ func addSubTask(jobId string) AddSubTaskCallback {
 	}
 }
 
-func updateSubTaskStatus(jobId string) SubTaskStatusUpdateCallback {
-	return func(taskType types.TaskType, key string, status types.TaskStatus) {
-		err := tsk.UpdateSubTaskStatusByKey(jobId, taskType, key, status)
+func updateSubTaskStatus(jobId string) SubTaskUpdateCallback {
+	return func(taskType types.TaskType, key string, subtask types.SubTask) {
+		err := tsk.UpdateSubTaskByKey(jobId, taskType, key, subtask)
 		if err != nil {
-			logger.Error("Failed to update subtask status",
+			logger.Error("Failed to update subtask",
 				slog.String("jobId", jobId),
 				slog.String("taskType", string(taskType)),
 				slog.String("key", key),
-				slog.String("status", string(status)),
+				slog.String("url", subtask.URL),
+				slog.String("description", subtask.Description),
+				slog.String("status", string(subtask.Status)),
 				slog.Any("error", err))
 			return
 		}
 
-		if err := mb.PublishSubTaskStatusUpdate(messagebus.SubTaskStatusUpdateMessage{
-			Type:     messagebus.SubTaskStatusUpdateMessageType,
+		if err := mb.PublishSubTaskUpdate(messagebus.SubTaskUpdateMessage{
+			Type:     messagebus.SubTaskUpdateMessageType,
 			JobID:    jobId,
 			TaskType: string(taskType),
 			Key:      key,
-			Status:   string(status),
+			SubTask:  subtask,
 		}); err != nil {
 			logger.Error("Failed to publish subtask status update",
 				slog.String("jobId", jobId),
 				slog.String("taskType", string(taskType)),
 				slog.String("key", key),
-				slog.String("status", string(status)),
+				slog.String("url", subtask.URL),
+				slog.String("description", subtask.Description),
+				slog.String("status", string(subtask.Status)),
 				slog.Any("error", err))
 		}
 	}

@@ -78,7 +78,7 @@ export function TaskCard({ jobId, jobStatus }: TaskCardProps) {
     });
 
     const unsubscribeSubTask = webSocketService.subscribeToSubTaskUpdates(
-      (updatedJobId, taskType, key, status, url) => {
+      (updatedJobId, taskType, key, subtask) => {
         if (updatedJobId === jobId) {
           setState(prev => {
             if (!prev.tasks) return prev;
@@ -87,22 +87,7 @@ export function TaskCard({ jobId, jobStatus }: TaskCardProps) {
               ...prev,
               tasks: prev.tasks.map(task => {
                 if (task.type === taskType) {
-                  const updatedSubtasks = { ...task.subtasks };
-
-                  if (!updatedSubtasks[key] && url) {
-                    // New subtask
-                    updatedSubtasks[key] = {
-                      type: 'validating_link',
-                      status: status,
-                      url
-                    };
-                  } else if (updatedSubtasks[key]) {
-                    // Update existing subtask
-                    updatedSubtasks[key] = {
-                      ...updatedSubtasks[key],
-                      status: status
-                    };
-                  }
+                  const updatedSubtasks = { ...task.subtasks, [key]: subtask };
 
                   return {
                     ...task,
@@ -152,8 +137,15 @@ export function TaskCard({ jobId, jobStatus }: TaskCardProps) {
             <div className="mt-2 ml-4 space-y-1">
               {Object.entries(task.subtasks).map(([key, subTask]) => (
                 <div key={key} className="text-sm">
-                  <span>{subTask.url}</span>
-                  <span className="ml-2">[{subTask.status}]</span>
+                  <div className="flex flex-col">
+                    <span className="font-medium">{subTask.url}</span>
+                    <div className="flex items-center">
+                      <span className="mr-2">[{subTask.status}]</span>
+                      {subTask.description && (
+                        <span className="text-gray-600">{subTask.description}</span>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>

@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -20,35 +21,35 @@ const (
 
 type TaskStatusUpdateCallback func(taskType types.TaskType, status types.TaskStatus)
 type AddSubTaskCallback func(taskType types.TaskType, key, url string)
-type SubTaskStatusUpdateCallback func(taskType types.TaskType, key string, status types.TaskStatus)
+type SubTaskUpdateCallback func(taskType types.TaskType, key string, subtask types.SubTask)
 
 type Analyzer struct {
 	htmlVersion       string
 	title             string
 	headings          map[string]int
 	links             []string
-	internalLinks     int
-	externalLinks     int
-	accessibleLinks   atomic.Int32
-	inaccessibleLinks atomic.Int32
+	internalLinks     int32
+	externalLinks     int32
+	accessibleLinks   int32
+	inaccessibleLinks int32
 	hasLoginForm      bool
 	baseUrl           string
 
 	hc *http.Client
 
-	TaskStatusUpdateCallback    TaskStatusUpdateCallback
-	AddSubTaskCallback          AddSubTaskCallback
-	SubTaskStatusUpdateCallback SubTaskStatusUpdateCallback
+	TaskStatusUpdateCallback TaskStatusUpdateCallback
+	AddSubTaskCallback       AddSubTaskCallback
+	SubTaskUpdateCallback    SubTaskUpdateCallback
 }
 
 func NewAnalyzer() *Analyzer {
 	return &Analyzer{
-		headings:                    make(map[string]int),
-		links:                       []string{},
-		hc:                          &http.Client{Timeout: httpClientTimeout},
-		TaskStatusUpdateCallback:    func(taskType types.TaskType, status types.TaskStatus) {},
-		AddSubTaskCallback:          func(taskType types.TaskType, key, url string) {},
-		SubTaskStatusUpdateCallback: func(taskType types.TaskType, key string, status types.TaskStatus) {},
+		headings:                 make(map[string]int),
+		links:                    []string{},
+		hc:                       &http.Client{Timeout: httpClientTimeout},
+		TaskStatusUpdateCallback: func(taskType types.TaskType, status types.TaskStatus) {},
+		AddSubTaskCallback:       func(taskType types.TaskType, key, url string) {},
+		SubTaskUpdateCallback:    func(taskType types.TaskType, key string, subtask types.SubTask) {},
 	}
 }
 
@@ -78,10 +79,10 @@ func (a *Analyzer) AnalyzeHTML(content string) (types.AnalyzeResult, error) {
 		PageTitle:         a.title,
 		Headings:          a.headings,
 		Links:             a.links,
-		InternalLinkCount: a.internalLinks,
-		ExternalLinkCount: a.externalLinks,
-		AccessibleLinks:   int(a.accessibleLinks.Load()),
-		InaccessibleLinks: int(a.inaccessibleLinks.Load()),
+		InternalLinkCount: int(atomic.LoadInt32(&a.internalLinks)),
+		ExternalLinkCount: int(atomic.LoadInt32(&a.externalLinks)),
+		AccessibleLinks:   int(atomic.LoadInt32(&a.accessibleLinks)),
+		InaccessibleLinks: int(atomic.LoadInt32(&a.inaccessibleLinks)),
 		HasLoginForm:      a.hasLoginForm,
 	}, nil
 }
@@ -121,9 +122,9 @@ func (a *Analyzer) dfs(n *html.Node) {
 							a.links = append(a.links, resolvedURL)
 
 							if isExternal {
-								a.externalLinks++
+								atomic.AddInt32(&a.externalLinks, 1)
 							} else {
-								a.internalLinks++
+								atomic.AddInt32(&a.internalLinks, 1)
 							}
 						}
 					}
@@ -263,14 +264,25 @@ func (a *Analyzer) verifyLinks() {
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
 
-			a.SubTaskStatusUpdateCallback(types.TaskTypeVerifyingLinks, key, types.TaskStatusRunning)
-			status := a.verifyLink(link)
-			a.SubTaskStatusUpdateCallback(types.TaskTypeVerifyingLinks, key, status)
+			a.SubTaskUpdateCallback(types.TaskTypeVerifyingLinks, key, types.SubTask{
+				Type:   types.SubTaskTypeValidatingLink,
+				Status: types.TaskStatusRunning,
+				URL:    link,
+			})
+
+			status, description := a.verifyLink(link)
+
+			a.SubTaskUpdateCallback(types.TaskTypeVerifyingLinks, key, types.SubTask{
+				Type:        types.SubTaskTypeValidatingLink,
+				Status:      status,
+				URL:         link,
+				Description: description,
+			})
 
 			if status == types.TaskStatusCompleted {
-				a.accessibleLinks.Add(1)
+				atomic.AddInt32(&a.accessibleLinks, 1)
 			} else {
-				a.inaccessibleLinks.Add(1)
+				atomic.AddInt32(&a.inaccessibleLinks, 1)
 			}
 
 		}(link, key)
@@ -280,48 +292,72 @@ func (a *Analyzer) verifyLinks() {
 	logger.Info("Completed link verification", slog.Int("linkCount", linkCount))
 }
 
-func (a *Analyzer) verifyLink(link string) types.TaskStatus {
+func (a *Analyzer) verifyLink(link string) (types.TaskStatus, string) {
 	parsedURL, err := url.Parse(link)
 	if err != nil {
+		errMsg := fmt.Sprintf("Invalid URL: %s", err.Error())
 		logger.Error("Error parsing URL",
 			slog.String("url", link),
 			slog.Any("error", err))
-		return types.TaskStatusFailed
+		return types.TaskStatusFailed, errMsg
 	}
 
 	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		description := fmt.Sprintf("Unsupported protocol: %s", parsedURL.Scheme)
 		logger.Debug("Skipping non-HTTP URL",
 			slog.String("url", link),
 			slog.String("scheme", parsedURL.Scheme))
-		return types.TaskStatusSkipped
+		return types.TaskStatusSkipped, description
 	}
 
 	req, err := http.NewRequest(http.MethodHead, link, nil)
 	if err != nil {
+		errMsg := fmt.Sprintf("Request creation failed: %s", err.Error())
 		logger.Error("Failed to create request",
 			slog.String("url", link),
 			slog.Any("error", err))
-		return types.TaskStatusFailed
+		return types.TaskStatusFailed, errMsg
 	}
 
 	resp, err := a.hc.Do(req)
 	if err != nil {
+		// URL error, connection failed, etc.
+		var errMsg string
+		if urlErr, ok := err.(*url.Error); ok {
+			if urlErr.Timeout() {
+				errMsg = "Connection timeout"
+			} else {
+				errMsg = fmt.Sprintf("Connection error: %s", urlErr.Err.Error())
+			}
+		} else {
+			errMsg = fmt.Sprintf("Request failed: %s", err.Error())
+		}
+
 		logger.Error("Failed to verify link",
 			slog.String("url", link),
 			slog.Any("error", err))
-		return types.TaskStatusFailed
+		return types.TaskStatusFailed, errMsg
 	}
 	defer resp.Body.Close()
+
+	description := fmt.Sprintf("HTTP %d: %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+
+	// Check for redirects
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		if location, ok := resp.Header["Location"]; ok && len(location) > 0 {
+			description = fmt.Sprintf("HTTP %d: Redirected to %s", resp.StatusCode, location[0])
+		}
+	}
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
 		logger.Debug("Link verified",
 			slog.String("url", link),
 			slog.Int("statusCode", resp.StatusCode))
-		return types.TaskStatusCompleted
+		return types.TaskStatusCompleted, description
 	}
 
 	logger.Warn("Link verification failed",
 		slog.String("url", link),
 		slog.Int("statusCode", resp.StatusCode))
-	return types.TaskStatusFailed
+	return types.TaskStatusFailed, description
 }

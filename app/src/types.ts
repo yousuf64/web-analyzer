@@ -55,6 +55,7 @@ export interface SubTask {
   type: SubTaskType;
   status: TaskStatus;
   url: string;
+  description: string;
 }
 
 export type SubTaskType = 'validating_link'; 

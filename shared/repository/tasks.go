@@ -124,7 +124,12 @@ func (t *TaskRepository) AddSubTaskByKey(jobId string, taskType types.TaskType, 
 	return err
 }
 
-func (t *TaskRepository) UpdateSubTaskStatusByKey(jobId string, taskType types.TaskType, key string, status types.TaskStatus) error {
+func (t *TaskRepository) UpdateSubTaskByKey(jobId string, taskType types.TaskType, key string, subtask types.SubTask) error {
+	subtaskItem, err := dynamodbattribute.MarshalMap(subtask)
+	if err != nil {
+		return err
+	}
+
 	input := &dynamodb.UpdateItemInput{
 		TableName: aws.String(TasksTableName),
 		Key: map[string]*dynamodb.AttributeValue{
@@ -135,20 +140,19 @@ func (t *TaskRepository) UpdateSubTaskStatusByKey(jobId string, taskType types.T
 				S: aws.String(string(taskType)),
 			},
 		},
-		UpdateExpression: aws.String("SET subtasks.#key.#status = :status"),
+		UpdateExpression: aws.String("SET subtasks.#key = :subtask"),
 		ExpressionAttributeNames: map[string]*string{
-			"#key":    aws.String(key),
-			"#status": aws.String("status"),
+			"#key": aws.String(key),
 		},
 		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-			":status": {
-				S: aws.String(string(status)),
+			":subtask": {
+				M: subtaskItem,
 			},
 		},
 		ConditionExpression: aws.String("attribute_exists(subtasks.#key)"),
 	}
 
-	_, err := t.dynamodb.UpdateItem(input)
+	_, err = t.dynamodb.UpdateItem(input)
 	if err != nil {
 		if strings.Contains(err.Error(), "ConditionalCheckFailedException") {
 			return errors.New("subtask not found for the given key")

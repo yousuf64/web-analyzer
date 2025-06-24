@@ -124,18 +124,23 @@ func setupSubscriptions(nc *nats.Conn) {
 	}
 	subscriptions = append(subscriptions, sub)
 
-	sub, err = mb.SubscribeToSubTaskStatusUpdate(func(msg *nats.Msg) {
-		var m messagebus.SubTaskStatusUpdateMessage
+	sub, err = mb.SubscribeToSubTaskUpdate(func(msg *nats.Msg) {
+		var m messagebus.SubTaskUpdateMessage
 		if err := json.Unmarshal(msg.Data, &m); err != nil {
 			logger.Error("Failed to unmarshal subtask update", slog.Any("error", err))
 			return
 		}
 
-		logger.Info("Broadcasting subtask status update for job", slog.String("jobId", m.JobID))
+		logger.Info("Broadcasting subtask update for job",
+			slog.String("jobId", m.JobID),
+			slog.String("key", m.Key),
+			slog.String("status", string(m.SubTask.Status)),
+			slog.String("url", m.SubTask.URL),
+			slog.String("description", m.SubTask.Description))
 		broadcastToUsers(m, m.JobID)
 	})
 	if err != nil {
-		logger.Error("Failed to subscribe to subtask status update", slog.Any("error", err))
+		logger.Error("Failed to subscribe to subtask update", slog.Any("error", err))
 		os.Exit(1)
 	}
 	subscriptions = append(subscriptions, sub)
