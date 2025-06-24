@@ -187,7 +187,12 @@ func analyze(am messagebus.AnalyzeMessage) (err error) {
 		return errors.Join(err, errors.New("failed to update job"))
 	}
 
-	return updateJobStatus(am.JobId, types.JobStatusCompleted)
+	return mb.PublishJobUpdate(messagebus.JobUpdateMessage{
+		Type:   messagebus.JobUpdateMessageType,
+		JobID:  am.JobId,
+		Status: string(types.JobStatusCompleted),
+		Result: &res,
+	})
 }
 
 func fetchContent(url string) (string, error) {
