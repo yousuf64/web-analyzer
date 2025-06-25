@@ -6,11 +6,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"shared/metrics"
 	"shared/types"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/net/html"
 )
@@ -36,17 +38,23 @@ type Analyzer struct {
 	baseUrl           string
 
 	hc *http.Client
+	mc metrics.AnalyzerMetricsInterface
 
 	TaskStatusUpdateCallback TaskStatusUpdateCallback
 	AddSubTaskCallback       AddSubTaskCallback
 	SubTaskUpdateCallback    SubTaskUpdateCallback
 }
 
-func NewAnalyzer() *Analyzer {
+func NewAnalyzer(m metrics.AnalyzerMetricsInterface) *Analyzer {
+	if m == nil {
+		m = metrics.NewNoopAnalyzerMetrics()
+	}
+
 	return &Analyzer{
 		headings:                 make(map[string]int),
 		links:                    []string{},
 		hc:                       &http.Client{Timeout: httpClientTimeout},
+		mc:                       m,
 		TaskStatusUpdateCallback: func(taskType types.TaskType, status types.TaskStatus) {},
 		AddSubTaskCallback:       func(taskType types.TaskType, key, url string) {},
 		SubTaskUpdateCallback:    func(taskType types.TaskType, key string, subtask types.SubTask) {},
@@ -54,25 +62,14 @@ func NewAnalyzer() *Analyzer {
 }
 
 func (a *Analyzer) AnalyzeHTML(content string) (types.AnalyzeResult, error) {
-	a.TaskStatusUpdateCallback(types.TaskTypeExtracting, types.TaskStatusPending)
-	doc, err := html.Parse(strings.NewReader(content))
+	doc, err := a.parseHTML(content)
 	if err != nil {
-		a.TaskStatusUpdateCallback(types.TaskTypeExtracting, types.TaskStatusFailed)
 		return types.AnalyzeResult{}, errors.Join(err, errors.New("failed to parse HTML"))
 	}
-	a.TaskStatusUpdateCallback(types.TaskTypeExtracting, types.TaskStatusCompleted)
 
-	a.TaskStatusUpdateCallback(types.TaskTypeIdentifyingVersion, types.TaskStatusRunning)
 	a.htmlVersion = a.detectHtmlVersion(content)
-	a.TaskStatusUpdateCallback(types.TaskTypeIdentifyingVersion, types.TaskStatusCompleted)
-
-	a.TaskStatusUpdateCallback(types.TaskTypeAnalyzing, types.TaskStatusRunning)
-	a.dfs(doc)
-	a.TaskStatusUpdateCallback(types.TaskTypeAnalyzing, types.TaskStatusCompleted)
-
-	a.TaskStatusUpdateCallback(types.TaskTypeVerifyingLinks, types.TaskStatusRunning)
+	a.analyzeContent(doc)
 	a.verifyLinks()
-	a.TaskStatusUpdateCallback(types.TaskTypeVerifyingLinks, types.TaskStatusCompleted)
 
 	return types.AnalyzeResult{
 		HtmlVersion:       a.htmlVersion,
@@ -92,7 +89,36 @@ func (a *Analyzer) SetBaseUrl(baseUrl string) {
 	a.baseUrl = baseUrl
 }
 
+func (a *Analyzer) parseHTML(content string) (doc *html.Node, err error) {
+	taskStart := time.Now()
+	a.TaskStatusUpdateCallback(types.TaskTypeExtracting, types.TaskStatusPending)
+
+	defer func() {
+		if err != nil {
+			a.TaskStatusUpdateCallback(types.TaskTypeExtracting, types.TaskStatusFailed)
+			a.mc.RecordAnalysisTask(string(types.TaskTypeExtracting), false, time.Since(taskStart).Seconds())
+		} else {
+			a.TaskStatusUpdateCallback(types.TaskTypeExtracting, types.TaskStatusCompleted)
+			a.mc.RecordAnalysisTask(string(types.TaskTypeExtracting), true, time.Since(taskStart).Seconds())
+		}
+	}()
+
+	doc, err = html.Parse(strings.NewReader(content))
+	if err != nil {
+		return nil, errors.Join(err, errors.New("failed to parse HTML"))
+	}
+
+	return doc, nil
+}
+
 func (a *Analyzer) detectHtmlVersion(content string) string {
+	taskStart := time.Now()
+	a.TaskStatusUpdateCallback(types.TaskTypeIdentifyingVersion, types.TaskStatusRunning)
+	defer func() {
+		a.TaskStatusUpdateCallback(types.TaskTypeIdentifyingVersion, types.TaskStatusCompleted)
+		a.mc.RecordAnalysisTask(string(types.TaskTypeIdentifyingVersion), true, time.Since(taskStart).Seconds())
+	}()
+
 	content = strings.ToLower(content)
 
 	if strings.Contains(content, "<!doctype html>") {
@@ -100,6 +126,17 @@ func (a *Analyzer) detectHtmlVersion(content string) string {
 	}
 
 	return "No !doctype"
+}
+
+func (a *Analyzer) analyzeContent(doc *html.Node) {
+	taskStart := time.Now()
+	a.TaskStatusUpdateCallback(types.TaskTypeAnalyzing, types.TaskStatusRunning)
+	defer func() {
+		a.TaskStatusUpdateCallback(types.TaskTypeAnalyzing, types.TaskStatusCompleted)
+		a.mc.RecordAnalysisTask(string(types.TaskTypeAnalyzing), true, time.Since(taskStart).Seconds())
+	}()
+
+	a.dfs(doc)
 }
 
 func (a *Analyzer) dfs(n *html.Node) {
@@ -239,12 +276,23 @@ func (a *Analyzer) dfsFormInputs(n *html.Node, hasPassword, hasEmail *bool) {
 }
 
 func (a *Analyzer) verifyLinks() {
+	taskStart := time.Now()
+	a.TaskStatusUpdateCallback(types.TaskTypeVerifyingLinks, types.TaskStatusRunning)
+	defer func() {
+		a.TaskStatusUpdateCallback(types.TaskTypeVerifyingLinks, types.TaskStatusCompleted)
+		a.mc.RecordAnalysisTask(string(types.TaskTypeVerifyingLinks), true, time.Since(taskStart).Seconds())
+	}()
+
 	linkCount := len(a.links)
 	if linkCount == 0 {
 		return
 	}
 
 	logger.Info("Starting link verification", slog.Int("linkCount", linkCount))
+
+	// Track concurrent link verifications
+	a.mc.SetConcurrentLinkVerifications(linkCount)
+	defer a.mc.SetConcurrentLinkVerifications(0)
 
 	var wg sync.WaitGroup
 	semaphore := make(chan struct{}, maxConc)
@@ -262,7 +310,9 @@ func (a *Analyzer) verifyLinks() {
 			defer wg.Done()
 
 			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
+			defer func() {
+				<-semaphore
+			}()
 
 			a.SubTaskUpdateCallback(types.TaskTypeVerifyingLinks, key, types.SubTask{
 				Type:   types.SubTaskTypeValidatingLink,
@@ -270,7 +320,9 @@ func (a *Analyzer) verifyLinks() {
 				URL:    link,
 			})
 
+			linkVerifyStart := time.Now()
 			status, description := a.verifyLink(link)
+			linkVerifyDuration := time.Since(linkVerifyStart).Seconds()
 
 			a.SubTaskUpdateCallback(types.TaskTypeVerifyingLinks, key, types.SubTask{
 				Type:        types.SubTaskTypeValidatingLink,
@@ -284,6 +336,8 @@ func (a *Analyzer) verifyLinks() {
 			} else {
 				atomic.AddInt32(&a.inaccessibleLinks, 1)
 			}
+
+			a.mc.RecordLinkVerification(status == types.TaskStatusCompleted, linkVerifyDuration)
 
 		}(link, key)
 	}
@@ -299,6 +353,7 @@ func (a *Analyzer) verifyLink(link string) (types.TaskStatus, string) {
 		logger.Error("Error parsing URL",
 			slog.String("url", link),
 			slog.Any("error", err))
+
 		return types.TaskStatusFailed, errMsg
 	}
 
@@ -316,9 +371,11 @@ func (a *Analyzer) verifyLink(link string) (types.TaskStatus, string) {
 		logger.Error("Failed to create request",
 			slog.String("url", link),
 			slog.Any("error", err))
+
 		return types.TaskStatusFailed, errMsg
 	}
 
+	start := time.Now()
 	resp, err := a.hc.Do(req)
 	if err != nil {
 		// URL error, connection failed, etc.
@@ -336,9 +393,13 @@ func (a *Analyzer) verifyLink(link string) (types.TaskStatus, string) {
 		logger.Error("Failed to verify link",
 			slog.String("url", link),
 			slog.Any("error", err))
+
+		a.mc.RecordHTTPClientRequest(0, time.Since(start).Seconds(), http.MethodHead, "link_verification")
 		return types.TaskStatusFailed, errMsg
 	}
 	defer resp.Body.Close()
+
+	a.mc.RecordHTTPClientRequest(resp.StatusCode, time.Since(start).Seconds(), http.MethodHead, "link_verification")
 
 	description := fmt.Sprintf("HTTP %d: %s", resp.StatusCode, http.StatusText(resp.StatusCode))
 

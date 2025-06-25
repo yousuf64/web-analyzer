@@ -4,6 +4,7 @@ import (
 	"errors"
 	"shared/types"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
@@ -13,19 +14,36 @@ import (
 const TasksTableName = "web-analyzer-tasks"
 
 type TaskRepository struct {
-	dynamodb *dynamodb.DynamoDB
+	ddb *dynamodb.DynamoDB
+	mc  MetricsCollector
 }
 
-func NewTaskRepository() (*TaskRepository, error) {
+// NewTaskRepository creates a new TaskRepository with the given metrics collector
+func NewTaskRepository(mc MetricsCollector) (*TaskRepository, error) {
 	ddb, err := NewDynamoDBClient()
 	if err != nil {
 		return nil, err
 	}
 
-	return &TaskRepository{dynamodb: ddb}, nil
+	if mc == nil {
+		mc = NoOpMetricsCollector{}
+	}
+
+	return &TaskRepository{
+		ddb: ddb,
+		mc:  mc,
+	}, nil
 }
 
-func (t *TaskRepository) CreateTasks(tasks ...*types.Task) error {
+// NewTaskRepositoryWithoutMetrics creates a new TaskRepository without metrics collection
+func NewTaskRepositoryWithoutMetrics() (*TaskRepository, error) {
+	return NewTaskRepository(NoOpMetricsCollector{})
+}
+
+func (t *TaskRepository) CreateTasks(tasks ...*types.Task) (err error) {
+	start := time.Now()
+	defer t.mc.RecordDatabaseOperation("batch_create", TasksTableName, start, err)
+
 	if len(tasks) == 0 {
 		return nil
 	}
@@ -58,7 +76,7 @@ func (t *TaskRepository) CreateTasks(tasks ...*types.Task) error {
 		},
 	}
 
-	_, err := t.dynamodb.BatchWriteItem(input)
+	_, err = t.ddb.BatchWriteItem(input)
 	if err != nil {
 		return err
 	}
@@ -66,7 +84,10 @@ func (t *TaskRepository) CreateTasks(tasks ...*types.Task) error {
 	return nil
 }
 
-func (t *TaskRepository) UpdateTaskStatus(jobId string, taskType types.TaskType, status types.TaskStatus) error {
+func (t *TaskRepository) UpdateTaskStatus(jobId string, taskType types.TaskType, status types.TaskStatus) (err error) {
+	start := time.Now()
+	defer t.mc.RecordDatabaseOperation("update", TasksTableName, start, err)
+
 	input := &dynamodb.UpdateItemInput{
 		TableName: aws.String(TasksTableName),
 		Key: map[string]*dynamodb.AttributeValue{
@@ -88,11 +109,14 @@ func (t *TaskRepository) UpdateTaskStatus(jobId string, taskType types.TaskType,
 		},
 	}
 
-	_, err := t.dynamodb.UpdateItem(input)
+	_, err = t.ddb.UpdateItem(input)
 	return err
 }
 
-func (t *TaskRepository) AddSubTaskByKey(jobId string, taskType types.TaskType, key string, subtask types.SubTask) error {
+func (t *TaskRepository) AddSubTaskByKey(jobId string, taskType types.TaskType, key string, subtask types.SubTask) (err error) {
+	start := time.Now()
+	defer t.mc.RecordDatabaseOperation("update", TasksTableName, start, err)
+
 	subtaskItem, err := dynamodbattribute.MarshalMap(subtask)
 	if err != nil {
 		return err
@@ -120,11 +144,14 @@ func (t *TaskRepository) AddSubTaskByKey(jobId string, taskType types.TaskType, 
 		},
 	}
 
-	_, err = t.dynamodb.UpdateItem(input)
+	_, err = t.ddb.UpdateItem(input)
 	return err
 }
 
-func (t *TaskRepository) UpdateSubTaskByKey(jobId string, taskType types.TaskType, key string, subtask types.SubTask) error {
+func (t *TaskRepository) UpdateSubTaskByKey(jobId string, taskType types.TaskType, key string, subtask types.SubTask) (err error) {
+	start := time.Now()
+	defer t.mc.RecordDatabaseOperation("update", TasksTableName, start, err)
+
 	subtaskItem, err := dynamodbattribute.MarshalMap(subtask)
 	if err != nil {
 		return err
@@ -152,10 +179,11 @@ func (t *TaskRepository) UpdateSubTaskByKey(jobId string, taskType types.TaskTyp
 		ConditionExpression: aws.String("attribute_exists(subtasks.#key)"),
 	}
 
-	_, err = t.dynamodb.UpdateItem(input)
+	_, err = t.ddb.UpdateItem(input)
 	if err != nil {
 		if strings.Contains(err.Error(), "ConditionalCheckFailedException") {
-			return errors.New("subtask not found for the given key")
+			conditionalErr := errors.New("subtask not found for the given key")
+			return conditionalErr
 		}
 		return err
 	}
@@ -163,7 +191,10 @@ func (t *TaskRepository) UpdateSubTaskByKey(jobId string, taskType types.TaskTyp
 	return nil
 }
 
-func (t *TaskRepository) GetTasksByJobId(jobId string) ([]types.Task, error) {
+func (t *TaskRepository) GetTasksByJobId(jobId string) (tasks []types.Task, err error) {
+	start := time.Now()
+	defer t.mc.RecordDatabaseOperation("query", TasksTableName, start, err)
+
 	input := &dynamodb.QueryInput{
 		TableName:              aws.String(TasksTableName),
 		KeyConditionExpression: aws.String("job_id = :job_id"),
@@ -174,12 +205,11 @@ func (t *TaskRepository) GetTasksByJobId(jobId string) ([]types.Task, error) {
 		},
 	}
 
-	result, err := t.dynamodb.Query(input)
+	result, err := t.ddb.Query(input)
 	if err != nil {
 		return nil, err
 	}
 
-	var tasks []types.Task
 	for _, item := range result.Items {
 		var task types.Task
 		err = dynamodbattribute.UnmarshalMap(item, &task)

@@ -14,19 +14,36 @@ import (
 const JobsTableName = "web-analyzer-jobs"
 
 type JobRepository struct {
-	dynamodb *dynamodb.DynamoDB
+	ddb *dynamodb.DynamoDB
+	mc  MetricsCollector
 }
 
-func NewJobRepository() (*JobRepository, error) {
+// NewJobRepository creates a new JobRepository with the given metrics collector
+func NewJobRepository(mc MetricsCollector) (*JobRepository, error) {
 	ddb, err := NewDynamoDBClient()
 	if err != nil {
 		return nil, err
 	}
 
-	return &JobRepository{dynamodb: ddb}, nil
+	if mc == nil {
+		mc = NoOpMetricsCollector{}
+	}
+
+	return &JobRepository{
+		ddb: ddb,
+		mc:  mc,
+	}, nil
 }
 
-func (j *JobRepository) CreateJob(job *types.Job) error {
+// NewJobRepositoryWithoutMetrics creates a new JobRepository without metrics collection
+func NewJobRepositoryWithoutMetrics() (*JobRepository, error) {
+	return NewJobRepository(NoOpMetricsCollector{})
+}
+
+func (j *JobRepository) CreateJob(job *types.Job) (err error) {
+	start := time.Now()
+	defer j.mc.RecordDatabaseOperation("create", JobsTableName, start, err)
+
 	job.PartitionKey = "1000"
 	item, err := dynamodbattribute.MarshalMap(job)
 	if err != nil {
@@ -38,11 +55,14 @@ func (j *JobRepository) CreateJob(job *types.Job) error {
 		Item:      item,
 	}
 
-	_, err = j.dynamodb.PutItem(input)
+	_, err = j.ddb.PutItem(input)
 	return err
 }
 
-func (j *JobRepository) GetJob(id string) (*types.Job, error) {
+func (j *JobRepository) GetJob(id string) (job *types.Job, err error) {
+	start := time.Now()
+	defer j.mc.RecordDatabaseOperation("get", JobsTableName, start, err)
+
 	input := &dynamodb.GetItemInput{
 		TableName: aws.String(JobsTableName),
 		Key: map[string]*dynamodb.AttributeValue{
@@ -55,25 +75,28 @@ func (j *JobRepository) GetJob(id string) (*types.Job, error) {
 		},
 	}
 
-	result, err := j.dynamodb.GetItem(input)
+	result, err := j.ddb.GetItem(input)
 	if err != nil {
 		return nil, err
 	}
 
 	if result.Item == nil {
-		return nil, errors.New("job not found")
+		notFoundErr := errors.New("job not found")
+		return nil, notFoundErr
 	}
 
-	var job types.Job
 	err = dynamodbattribute.UnmarshalMap(result.Item, &job)
 	if err != nil {
 		return nil, err
 	}
 
-	return &job, nil
+	return job, nil
 }
 
-func (j *JobRepository) GetAllJobs() ([]*types.Job, error) {
+func (j *JobRepository) GetAllJobs() (jobs []*types.Job, err error) {
+	start := time.Now()
+	defer j.mc.RecordDatabaseOperation("query", JobsTableName, start, err)
+
 	input := &dynamodb.QueryInput{
 		TableName:              aws.String(JobsTableName),
 		KeyConditionExpression: aws.String("#partition_key = :partition_key"),
@@ -88,12 +111,12 @@ func (j *JobRepository) GetAllJobs() ([]*types.Job, error) {
 		ScanIndexForward: aws.Bool(false), // false for descending order since JobID is based on timestamp
 	}
 
-	result, err := j.dynamodb.Query(input)
+	result, err := j.ddb.Query(input)
 	if err != nil {
 		return nil, err
 	}
 
-	jobs := make([]*types.Job, 0, len(result.Items))
+	jobs = make([]*types.Job, 0, len(result.Items))
 	for _, item := range result.Items {
 		var job types.Job
 		err = dynamodbattribute.UnmarshalMap(item, &job)
@@ -106,7 +129,10 @@ func (j *JobRepository) GetAllJobs() ([]*types.Job, error) {
 	return jobs, nil
 }
 
-func (j *JobRepository) UpdateJobStatus(id string, status types.JobStatus) error {
+func (j *JobRepository) UpdateJobStatus(id string, status types.JobStatus) (err error) {
+	start := time.Now()
+	defer j.mc.RecordDatabaseOperation("update", JobsTableName, start, err)
+
 	input := &dynamodb.UpdateItemInput{
 		TableName: aws.String(JobsTableName),
 		Key: map[string]*dynamodb.AttributeValue{
@@ -131,11 +157,14 @@ func (j *JobRepository) UpdateJobStatus(id string, status types.JobStatus) error
 		},
 	}
 
-	_, err := j.dynamodb.UpdateItem(input)
+	_, err = j.ddb.UpdateItem(input)
 	return err
 }
 
-func (j *JobRepository) UpdateJob(id string, status *types.JobStatus, result *types.AnalyzeResult) error {
+func (j *JobRepository) UpdateJob(id string, status *types.JobStatus, result *types.AnalyzeResult) (err error) {
+	start := time.Now()
+	defer j.mc.RecordDatabaseOperation("update", JobsTableName, start, err)
+
 	var updateExpressions []string
 	expressionAttributeValues := make(map[string]*dynamodb.AttributeValue)
 	expressionAttributeNames := make(map[string]*string)
@@ -195,6 +224,6 @@ func (j *JobRepository) UpdateJob(id string, status *types.JobStatus, result *ty
 		input.ExpressionAttributeValues = expressionAttributeValues
 	}
 
-	_, err := j.dynamodb.UpdateItem(input)
+	_, err = j.ddb.UpdateItem(input)
 	return err
 }

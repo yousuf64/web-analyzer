@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -8,8 +9,10 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"shared/log"
 	"shared/messagebus"
+	"shared/metrics"
 	"shared/repository"
 	"shared/types"
 	"syscall"
@@ -29,6 +32,7 @@ var (
 	mb     *messagebus.MessageBus
 	h      *http.Client
 	logger *slog.Logger
+	mc     *metrics.AnalyzerMetrics
 )
 
 func updateJobStatus(jobId string, status types.JobStatus) error {
@@ -53,21 +57,34 @@ func main() {
 	logger = log.SetupFromEnv("analyzer")
 	logger.Info("Starting analyzer service")
 
+	// Initialize metrics
+	mc = metrics.NewAnalyzerMetrics()
+	mc.MustRegisterAnalyzer()
+	mc.SetServiceInfo("1.0.0", runtime.Version())
+
+	// Start metrics server
+	metricsServer := mc.StartMetricsServer("9091")
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		metricsServer.Shutdown(ctx)
+	}()
+
 	// Initialize dependencies
 	ddc, err := repository.NewDynamoDBClient()
 	if err != nil {
 		logger.Error("Failed to create DynamoDB client", slog.Any("error", err))
 		os.Exit(1)
 	}
-	repository.SeedTables(ddc)
+	repository.SeedTables(ddc, mc)
 
-	jb, err = repository.NewJobRepository()
+	jb, err = repository.NewJobRepository(mc)
 	if err != nil {
 		logger.Error("Failed to create job repository", slog.Any("error", err))
 		os.Exit(1)
 	}
 
-	tsk, err = repository.NewTaskRepository()
+	tsk, err = repository.NewTaskRepository(mc)
 	if err != nil {
 		logger.Error("Failed to create task repository", slog.Any("error", err))
 		os.Exit(1)
@@ -84,7 +101,8 @@ func main() {
 	}
 	defer nc.Close()
 
-	mb = messagebus.New(nc)
+	mb = messagebus.New(nc, mc)
+
 	sub, err := mb.SubscribeToAnalyzeMessage(messageHandler)
 	if err != nil {
 		logger.Error("Failed to subscribe to analyze message", slog.Any("error", err))
@@ -113,21 +131,25 @@ func messageHandler(msg *nats.Msg) {
 
 	logger.Info("Processing analyze request", slog.String("jobId", am.JobId))
 
-	startTime := time.Now()
-	if err := analyze(am); err != nil {
+	analysisStart := time.Now()
+	err := analyzeUrl(am)
+	if err != nil {
 		logger.Error("Failed to process analyze request",
 			slog.String("jobId", am.JobId),
 			slog.Any("error", err))
+		mc.RecordAnalysisJob(false, time.Since(analysisStart).Seconds())
 		return
 	}
 
-	duration := time.Since(startTime)
+	duration := time.Since(analysisStart)
 	logger.Info("Completed analyze request",
 		slog.String("jobId", am.JobId),
 		slog.Duration("processingTime", duration))
+
+	mc.RecordAnalysisJob(true, duration.Seconds())
 }
 
-func analyze(am messagebus.AnalyzeMessage) (err error) {
+func analyzeUrl(am messagebus.AnalyzeMessage) (err error) {
 	defer func() {
 		if err != nil {
 			logger.Error("Analysis failed",
@@ -160,7 +182,7 @@ func analyze(am messagebus.AnalyzeMessage) (err error) {
 		return errors.Join(err, errors.New("failed to fetch content"))
 	}
 
-	an := NewAnalyzer()
+	an := NewAnalyzer(mc)
 	an.SetBaseUrl(job.URL)
 	an.TaskStatusUpdateCallback = updateTaskStatus(am.JobId)
 	an.AddSubTaskCallback = addSubTask(am.JobId)
@@ -187,12 +209,13 @@ func analyze(am messagebus.AnalyzeMessage) (err error) {
 		return errors.Join(err, errors.New("failed to update job"))
 	}
 
-	return mb.PublishJobUpdate(messagebus.JobUpdateMessage{
+	err = mb.PublishJobUpdate(messagebus.JobUpdateMessage{
 		Type:   messagebus.JobUpdateMessageType,
 		JobID:  am.JobId,
 		Status: string(types.JobStatusCompleted),
 		Result: &res,
 	})
+	return err
 }
 
 func fetchContent(url string) (string, error) {
@@ -201,11 +224,14 @@ func fetchContent(url string) (string, error) {
 		return "", errors.Join(err, errors.New("failed to create request"))
 	}
 
+	start := time.Now()
 	resp, err := h.Do(r)
 	if err != nil {
 		return "", errors.Join(err, errors.New("failed to execute request"))
 	}
 	defer resp.Body.Close()
+
+	mc.RecordHTTPClientRequest(resp.StatusCode, time.Since(start).Seconds(), r.Method, "content_fetch")
 
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {

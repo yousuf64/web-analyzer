@@ -1,16 +1,20 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"shared/log"
 	"shared/messagebus"
+	"shared/metrics"
 	"slices"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/nats-io/nats.go"
@@ -33,6 +37,7 @@ var (
 	wsLock        sync.RWMutex
 	subscriptions []*nats.Subscription
 	logger        *slog.Logger
+	mc            *metrics.NotificationsMetrics
 )
 
 func (wsc *WSConnection) addGroup(group string) {
@@ -61,6 +66,8 @@ func (wsc *WSConnection) hasGroup(group string) bool {
 }
 
 func broadcastToUsers(message any, group string) {
+	broadcastStart := time.Now()
+
 	jsonMessage, err := json.Marshal(message)
 	if err != nil {
 		logger.Error("Failed to marshal message", slog.Any("error", err))
@@ -70,28 +77,50 @@ func broadcastToUsers(message any, group string) {
 	wsLock.RLock()
 	defer wsLock.RUnlock()
 
+	messageType := "unknown"
+	if msgMap, ok := message.(map[string]interface{}); ok {
+		if t, exists := msgMap["type"]; exists {
+			if typeStr, ok := t.(string); ok {
+				messageType = typeStr
+			}
+		}
+	}
+
+	successCount := 0
+	totalCount := 0
+
 	for conn := range wsConnections {
 		// If a group is specified, only send to connections subscribed to that group
 		if group != "" && !conn.hasGroup(group) {
 			continue
 		}
 
+		totalCount++
 		err := conn.conn.WriteMessage(websocket.TextMessage, jsonMessage)
 		if err != nil {
 			logger.Error("Failed to write to websocket", slog.Any("error", err))
+			mc.RecordWebSocketMessage(messageType, false, 0)
+
 			// Remove connection on error
 			go func(c *WSConnection) {
 				wsLock.Lock()
 				delete(wsConnections, c)
+				mc.SetActiveWebSocketConnections(len(wsConnections))
 				wsLock.Unlock()
 				c.conn.Close()
 			}(conn)
+		} else {
+			successCount++
 		}
+	}
+
+	if totalCount > 0 {
+		mc.RecordWebSocketMessage(messageType, successCount == totalCount, time.Since(broadcastStart).Seconds())
 	}
 }
 
 func setupSubscriptions(nc *nats.Conn) {
-	mb := messagebus.New(nc)
+	mb := messagebus.New(nc, mc)
 
 	sub, err := mb.SubscribeToJobUpdate(func(msg *nats.Msg) {
 		var m messagebus.JobUpdateMessage
@@ -147,9 +176,12 @@ func setupSubscriptions(nc *nats.Conn) {
 }
 
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	connectionStart := time.Now()
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		logger.Error("Failed to upgrade websocket connection", slog.Any("error", err))
+		mc.RecordWebSocketConnection(false)
 		return
 	}
 	defer conn.Close()
@@ -162,15 +194,26 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Add the connection to the map
 	wsLock.Lock()
 	wsConnections[wsConn] = true
+	connectionCount := len(wsConnections)
 	wsLock.Unlock()
+
+	// Record successful connection
+	mc.RecordWebSocketConnection(true)
+	mc.SetActiveWebSocketConnections(connectionCount)
 
 	logger.Info("New WebSocket connection established")
 
 	// Remove the connection from the map on return
 	defer func() {
+		connectionDuration := time.Since(connectionStart).Seconds()
+		mc.RecordWebSocketConnectionDuration(connectionDuration)
+
 		wsLock.Lock()
 		delete(wsConnections, wsConn)
+		connectionCount := len(wsConnections)
 		wsLock.Unlock()
+
+		mc.SetActiveWebSocketConnections(connectionCount)
 		logger.Info("WebSocket connection closed")
 	}()
 
@@ -194,10 +237,12 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				switch subscriptionUpdate.Action {
 				case "subscribe":
 					wsConn.addGroup(subscriptionUpdate.Group)
+					mc.RecordGroupSubscription("subscribe", subscriptionUpdate.Group)
 					logger.Info("Added subscription for group", slog.String("group", subscriptionUpdate.Group))
 
 				case "unsubscribe":
 					wsConn.removeGroup(subscriptionUpdate.Group)
+					mc.RecordGroupSubscription("unsubscribe", subscriptionUpdate.Group)
 					logger.Info("Removed subscription for group", slog.String("group", subscriptionUpdate.Group))
 
 				}
@@ -225,6 +270,19 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 func main() {
 	logger = log.SetupFromEnv("notifications")
 	logger.Info("Starting notifications service")
+
+	// Initialize metrics
+	mc = metrics.NewNotificationsMetrics()
+	mc.MustRegisterNotifications()
+	mc.SetServiceInfo("1.0.0", runtime.Version())
+
+	// Start metrics server
+	metricsServer := mc.StartMetricsServer("9092")
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		metricsServer.Shutdown(ctx)
+	}()
 
 	nc, err := nats.Connect(nats.DefaultURL)
 	if err != nil {

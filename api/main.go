@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"shared/log"
 	"shared/messagebus"
+	"shared/metrics"
 	"shared/repository"
 	"shared/types"
 	"sync"
@@ -23,55 +25,47 @@ import (
 )
 
 var (
-	jobRepo  *repository.JobRepository
-	taskRepo *repository.TaskRepository
-	logger   *slog.Logger
+	jobRepo    *repository.JobRepository
+	taskRepo   *repository.TaskRepository
+	logger     *slog.Logger
+	mc         *metrics.APIMetrics
 )
-
-func corsMiddleware(next shift.HandlerFunc) shift.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request, route shift.Route) error {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Max-Age", "86400")
-
-		return next(w, r, route)
-	}
-}
-
-func errorMiddleware(next shift.HandlerFunc) shift.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request, route shift.Route) error {
-		err := next(w, r, route)
-		if err != nil {
-			logger.Error("Request error",
-				slog.String("method", r.Method),
-				slog.String("path", r.URL.Path),
-				slog.Any("error", err))
-
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
-		return err
-	}
-}
 
 func main() {
 	logger = log.SetupFromEnv("api")
 	logger.Info("Starting API service")
+
+	// Initialize metrics
+	mc = metrics.NewAPIMetrics()
+	mc.MustRegisterAPI()
+	mc.SetServiceInfo("1.0.0", runtime.Version())
+
+	// Start metrics server
+	metricsServer := mc.StartMetricsServer("9090")
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		metricsServer.Shutdown(ctx)
+	}()
 
 	dynamodb, err := repository.NewDynamoDBClient()
 	if err != nil {
 		logger.Error("Failed to create DynamoDB client", slog.Any("error", err))
 		os.Exit(1)
 	}
-	repository.SeedTables(dynamodb)
 
-	jobRepo, err = repository.NewJobRepository()
+	if err := repository.SeedTables(dynamodb, mc); err != nil {
+		logger.Error("Failed to seed tables", slog.Any("error", err))
+		os.Exit(1)
+	}
+
+	jobRepo, err = repository.NewJobRepository(mc)
 	if err != nil {
 		logger.Error("Failed to create job repository", slog.Any("error", err))
 		os.Exit(1)
 	}
 
-	taskRepo, err = repository.NewTaskRepository()
+	taskRepo, err = repository.NewTaskRepository(mc)
 	if err != nil {
 		logger.Error("Failed to create task repository", slog.Any("error", err))
 		os.Exit(1)
@@ -84,10 +78,11 @@ func main() {
 	}
 	defer nc.Close()
 
-	mb := messagebus.New(nc)
+	mb := messagebus.New(nc, mc)
 
 	router := shift.New()
 	router.Use(corsMiddleware)
+	router.Use(mc.HTTPMiddleware)
 	router.Use(errorMiddleware)
 
 	// Register OPTIONS handler for all routes, so that CORS is handled by the middleware
@@ -96,7 +91,12 @@ func main() {
 		return nil
 	})
 
-	router.POST("/analyze", func(w http.ResponseWriter, r *http.Request, route shift.Route) error {
+	router.POST("/analyze", func(w http.ResponseWriter, r *http.Request, route shift.Route) (err error) {
+		jobCreationStart := time.Now()
+		defer func() {
+			mc.RecordJobCreation(err == nil, time.Since(jobCreationStart))
+		}()
+
 		var req types.AnalyzeRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			return errors.Join(err, errors.New("failed to decode request"))
@@ -114,11 +114,13 @@ func main() {
 			CreatedAt: time.Now().UTC(),
 			UpdatedAt: time.Now().UTC(),
 		}
+
 		if err := jobRepo.CreateJob(job); err != nil {
 			return errors.Join(err, errors.New("failed to create job"))
 		}
 
-		if err := taskRepo.CreateTasks(getDefaultTasks(jobId)...); err != nil {
+		defaultTasks := getDefaultTasks(jobId)
+		if err := taskRepo.CreateTasks(defaultTasks...); err != nil {
 			return errors.Join(err, errors.New("failed to create tasks"))
 		}
 

@@ -1,7 +1,8 @@
 package repository
 
 import (
-	"log"
+	"log/slog"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -28,25 +29,24 @@ func NewDynamoDBClient() (*dynamodb.DynamoDB, error) {
 	return client, nil
 }
 
-func SeedTables(client *dynamodb.DynamoDB) error {
+func SeedTables(client *dynamodb.DynamoDB, mc MetricsCollector) error {
 	jobsTableName := "web-analyzer-jobs"
 	tasksTableName := "web-analyzer-tasks"
 
-	err := createJobsTableIfNotExists(client, jobsTableName)
+	err := createJobsTableIfNotExists(client, jobsTableName, mc)
 	if err != nil {
 		return err
 	}
 
-	err = createTasksTableIfNotExists(client, tasksTableName)
+	err = createTasksTableIfNotExists(client, tasksTableName, mc)
 	if err != nil {
 		return err
 	}
 
-	log.Println("DynamoDB tables seeded successfully")
 	return nil
 }
 
-func createJobsTableIfNotExists(client *dynamodb.DynamoDB, tableName string) error {
+func createJobsTableIfNotExists(client *dynamodb.DynamoDB, tableName string, mc MetricsCollector) error {
 	// Check if table exists
 	_, err := client.DescribeTable(&dynamodb.DescribeTableInput{
 		TableName: aws.String(tableName),
@@ -54,6 +54,9 @@ func createJobsTableIfNotExists(client *dynamodb.DynamoDB, tableName string) err
 	if err == nil {
 		return nil // Table already exists
 	}
+
+	start := time.Now()
+	defer mc.RecordDatabaseOperation("create", tableName, start, nil)
 
 	input := &dynamodb.CreateTableInput{
 		TableName: aws.String(tableName),
@@ -85,11 +88,11 @@ func createJobsTableIfNotExists(client *dynamodb.DynamoDB, tableName string) err
 		return err
 	}
 
-	log.Printf("Created DynamoDB jobs table: %s", tableName)
+	slog.Info("Created DynamoDB jobs table", "table", tableName)
 	return nil
 }
 
-func createTasksTableIfNotExists(client *dynamodb.DynamoDB, tableName string) error {
+func createTasksTableIfNotExists(client *dynamodb.DynamoDB, tableName string, mc MetricsCollector) error {
 	// Check if table exists
 	_, err := client.DescribeTable(&dynamodb.DescribeTableInput{
 		TableName: aws.String(tableName),
@@ -97,6 +100,9 @@ func createTasksTableIfNotExists(client *dynamodb.DynamoDB, tableName string) er
 	if err == nil {
 		return nil // Table already exists
 	}
+
+	start := time.Now()
+	defer mc.RecordDatabaseOperation("create", tableName, start, nil)
 
 	input := &dynamodb.CreateTableInput{
 		TableName: aws.String(tableName),
@@ -128,6 +134,6 @@ func createTasksTableIfNotExists(client *dynamodb.DynamoDB, tableName string) er
 		return err
 	}
 
-	log.Printf("Created DynamoDB tasks table: %s", tableName)
+	slog.Info("Created DynamoDB tasks table", "table", tableName)
 	return nil
 }
