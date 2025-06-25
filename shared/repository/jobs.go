@@ -1,7 +1,9 @@
 package repository
 
 import (
+	"context"
 	"errors"
+	"shared/tracing"
 	"shared/types"
 	"strings"
 	"time"
@@ -35,14 +37,14 @@ func NewJobRepository(mc MetricsCollector) (*JobRepository, error) {
 	}, nil
 }
 
-// NewJobRepositoryWithoutMetrics creates a new JobRepository without metrics collection
-func NewJobRepositoryWithoutMetrics() (*JobRepository, error) {
-	return NewJobRepository(NoOpMetricsCollector{})
-}
-
-func (j *JobRepository) CreateJob(job *types.Job) (err error) {
+func (j *JobRepository) CreateJob(ctx context.Context, job *types.Job) (err error) {
 	start := time.Now()
-	defer j.mc.RecordDatabaseOperation("create", JobsTableName, start, err)
+	_, span := tracing.CreateDatabaseSpan(ctx, "create_job", JobsTableName)
+
+	defer func() {
+		j.mc.RecordDatabaseOperation("create_job", JobsTableName, start, err)
+		span.Close(err)
+	}()
 
 	job.PartitionKey = "1000"
 	item, err := dynamodbattribute.MarshalMap(job)
@@ -59,9 +61,14 @@ func (j *JobRepository) CreateJob(job *types.Job) (err error) {
 	return err
 }
 
-func (j *JobRepository) GetJob(id string) (job *types.Job, err error) {
+func (j *JobRepository) GetJob(ctx context.Context, id string) (job *types.Job, err error) {
 	start := time.Now()
-	defer j.mc.RecordDatabaseOperation("get", JobsTableName, start, err)
+	_, span := tracing.CreateDatabaseSpan(ctx, "get_job", JobsTableName)
+
+	defer func() {
+		j.mc.RecordDatabaseOperation("get_job", JobsTableName, start, err)
+		span.Close(err)
+	}()
 
 	input := &dynamodb.GetItemInput{
 		TableName: aws.String(JobsTableName),
@@ -93,9 +100,14 @@ func (j *JobRepository) GetJob(id string) (job *types.Job, err error) {
 	return job, nil
 }
 
-func (j *JobRepository) GetAllJobs() (jobs []*types.Job, err error) {
+func (j *JobRepository) GetAllJobs(ctx context.Context) (jobs []*types.Job, err error) {
 	start := time.Now()
-	defer j.mc.RecordDatabaseOperation("query", JobsTableName, start, err)
+	_, span := tracing.CreateDatabaseSpan(ctx, "query_all_jobs", JobsTableName)
+
+	defer func() {
+		j.mc.RecordDatabaseOperation("query_all_jobs", JobsTableName, start, err)
+		span.Close(err)
+	}()
 
 	input := &dynamodb.QueryInput{
 		TableName:              aws.String(JobsTableName),
@@ -129,9 +141,14 @@ func (j *JobRepository) GetAllJobs() (jobs []*types.Job, err error) {
 	return jobs, nil
 }
 
-func (j *JobRepository) UpdateJobStatus(id string, status types.JobStatus) (err error) {
+func (j *JobRepository) UpdateJobStatus(ctx context.Context, id string, status types.JobStatus) (err error) {
 	start := time.Now()
-	defer j.mc.RecordDatabaseOperation("update", JobsTableName, start, err)
+	_, span := tracing.CreateDatabaseSpan(ctx, "update_job_status", JobsTableName)
+
+	defer func() {
+		j.mc.RecordDatabaseOperation("update_job_status", JobsTableName, start, err)
+		span.Close(err)
+	}()
 
 	input := &dynamodb.UpdateItemInput{
 		TableName: aws.String(JobsTableName),
@@ -161,9 +178,14 @@ func (j *JobRepository) UpdateJobStatus(id string, status types.JobStatus) (err 
 	return err
 }
 
-func (j *JobRepository) UpdateJob(id string, status *types.JobStatus, result *types.AnalyzeResult) (err error) {
+func (j *JobRepository) UpdateJob(ctx context.Context, id string, status *types.JobStatus, result *types.AnalyzeResult) (err error) {
 	start := time.Now()
-	defer j.mc.RecordDatabaseOperation("update", JobsTableName, start, err)
+	_, span := tracing.CreateDatabaseSpan(ctx, "update_job", JobsTableName)
+
+	defer func() {
+		j.mc.RecordDatabaseOperation("update_job", JobsTableName, start, err)
+		span.Close(err)
+	}()
 
 	var updateExpressions []string
 	expressionAttributeValues := make(map[string]*dynamodb.AttributeValue)

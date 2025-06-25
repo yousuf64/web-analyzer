@@ -14,6 +14,7 @@ import (
 	"shared/messagebus"
 	"shared/metrics"
 	"shared/repository"
+	"shared/tracing"
 	"shared/types"
 	"syscall"
 	"time"
@@ -35,13 +36,13 @@ var (
 	mc     *metrics.AnalyzerMetrics
 )
 
-func updateJobStatus(jobId string, status types.JobStatus) error {
-	err := jb.UpdateJobStatus(jobId, status)
+func updateJobStatus(ctx context.Context, jobId string, status types.JobStatus) error {
+	err := jb.UpdateJobStatus(ctx, jobId, status)
 	if err != nil {
 		return err
 	}
 
-	if err := mb.PublishJobUpdate(messagebus.JobUpdateMessage{
+	if err := mb.PublishJobUpdate(ctx, messagebus.JobUpdateMessage{
 		Type:   messagebus.JobUpdateMessageType,
 		JobID:  jobId,
 		Status: string(status),
@@ -56,6 +57,14 @@ func updateJobStatus(jobId string, status types.JobStatus) error {
 func main() {
 	logger = log.SetupFromEnv("analyzer")
 	logger.Info("Starting analyzer service")
+
+	ctx := context.Background()
+	shutdown, err := tracing.SetupOTelSDK(ctx, "analyzer")
+	if err != nil {
+		logger.Error("Failed to setup tracing", slog.Any("error", err))
+		os.Exit(1)
+	}
+	defer shutdown(ctx)
 
 	// Initialize metrics
 	mc = metrics.NewAnalyzerMetrics()
@@ -90,8 +99,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	tr := http.DefaultTransport
+	tr = tracing.HTTPClientMiddleware()(tr)
+
 	h = &http.Client{
-		Timeout: httpClientTimeout,
+		Timeout:   httpClientTimeout,
+		Transport: tr,
 	}
 
 	nc, err = nats.Connect(nats.DefaultURL)
@@ -120,7 +133,7 @@ func main() {
 	logger.Info("Shutting down analyzer service", slog.String("signal", sig.String()))
 }
 
-func messageHandler(msg *nats.Msg) {
+func messageHandler(ctx context.Context, msg *nats.Msg) {
 	var am messagebus.AnalyzeMessage
 	if err := json.Unmarshal(msg.Data, &am); err != nil {
 		logger.Error("Failed to unmarshal analyze message",
@@ -132,7 +145,7 @@ func messageHandler(msg *nats.Msg) {
 	logger.Info("Processing analyze request", slog.String("jobId", am.JobId))
 
 	analysisStart := time.Now()
-	err := analyzeUrl(am)
+	err := analyzeUrl(ctx, am)
 	if err != nil {
 		logger.Error("Failed to process analyze request",
 			slog.String("jobId", am.JobId),
@@ -149,22 +162,27 @@ func messageHandler(msg *nats.Msg) {
 	mc.RecordAnalysisJob(true, duration.Seconds())
 }
 
-func analyzeUrl(am messagebus.AnalyzeMessage) (err error) {
+func analyzeUrl(ctx context.Context, am messagebus.AnalyzeMessage) (err error) {
 	defer func() {
 		if err != nil {
 			logger.Error("Analysis failed",
 				slog.String("jobId", am.JobId),
 				slog.Any("error", err))
 
-			if err := updateJobStatus(am.JobId, types.JobStatusFailed); err != nil {
+			if err := updateJobStatus(ctx, am.JobId, types.JobStatusFailed); err != nil {
 				logger.Error("Failed to update job status",
 					slog.String("jobId", am.JobId),
 					slog.Any("error", err))
 			}
+
+			tsk.UpdateTaskStatus(ctx, am.JobId, types.TaskTypeExtracting, types.TaskStatusFailed)
+			tsk.UpdateTaskStatus(ctx, am.JobId, types.TaskTypeIdentifyingVersion, types.TaskStatusFailed)
+			tsk.UpdateTaskStatus(ctx, am.JobId, types.TaskTypeAnalyzing, types.TaskStatusFailed)
+			tsk.UpdateTaskStatus(ctx, am.JobId, types.TaskTypeVerifyingLinks, types.TaskStatusFailed)
 		}
 	}()
 
-	job, err := jb.GetJob(am.JobId)
+	job, err := jb.GetJob(ctx, am.JobId)
 	if err != nil {
 		return errors.Join(err, errors.New("job not found"))
 	}
@@ -173,22 +191,22 @@ func analyzeUrl(am messagebus.AnalyzeMessage) (err error) {
 		slog.String("jobId", am.JobId),
 		slog.String("url", job.URL))
 
-	if err := updateJobStatus(am.JobId, types.JobStatusRunning); err != nil {
+	if err := updateJobStatus(ctx, am.JobId, types.JobStatusRunning); err != nil {
 		return errors.Join(err, errors.New("failed to update job status"))
 	}
 
-	c, err := fetchContent(job.URL)
+	c, err := fetchContent(ctx, job.URL)
 	if err != nil {
 		return errors.Join(err, errors.New("failed to fetch content"))
 	}
 
-	an := NewAnalyzer(mc)
+	an := NewAnalyzer(h, mc)
 	an.SetBaseUrl(job.URL)
-	an.TaskStatusUpdateCallback = updateTaskStatus(am.JobId)
-	an.AddSubTaskCallback = addSubTask(am.JobId)
-	an.SubTaskUpdateCallback = updateSubTaskStatus(am.JobId)
+	an.TaskStatusUpdateCallback = updateTaskStatus(ctx, am.JobId)
+	an.AddSubTaskCallback = addSubTask(ctx, am.JobId)
+	an.SubTaskUpdateCallback = updateSubTaskStatus(ctx, am.JobId)
 
-	res, err := an.AnalyzeHTML(c)
+	res, err := an.AnalyzeHTML(ctx, c)
 	if err != nil {
 		return errors.Join(err, errors.New("failed to analyze HTML"))
 	}
@@ -204,12 +222,12 @@ func analyzeUrl(am messagebus.AnalyzeMessage) (err error) {
 		slog.Bool("hasLoginForm", res.HasLoginForm))
 
 	completedStatus := types.JobStatusCompleted
-	err = jb.UpdateJob(job.ID, &completedStatus, &res)
+	err = jb.UpdateJob(ctx, job.ID, &completedStatus, &res)
 	if err != nil {
 		return errors.Join(err, errors.New("failed to update job"))
 	}
 
-	err = mb.PublishJobUpdate(messagebus.JobUpdateMessage{
+	err = mb.PublishJobUpdate(ctx, messagebus.JobUpdateMessage{
 		Type:   messagebus.JobUpdateMessageType,
 		JobID:  am.JobId,
 		Status: string(types.JobStatusCompleted),
@@ -218,8 +236,8 @@ func analyzeUrl(am messagebus.AnalyzeMessage) (err error) {
 	return err
 }
 
-func fetchContent(url string) (string, error) {
-	r, err := http.NewRequest(http.MethodGet, url, nil)
+func fetchContent(ctx context.Context, url string) (string, error) {
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", errors.Join(err, errors.New("failed to create request"))
 	}
@@ -241,9 +259,9 @@ func fetchContent(url string) (string, error) {
 	return string(b), nil
 }
 
-func updateTaskStatus(jobId string) TaskStatusUpdateCallback {
+func updateTaskStatus(ctx context.Context, jobId string) TaskStatusUpdateCallback {
 	return func(taskType types.TaskType, status types.TaskStatus) {
-		err := tsk.UpdateTaskStatus(jobId, taskType, status)
+		err := tsk.UpdateTaskStatus(ctx, jobId, taskType, status)
 		if err != nil {
 			logger.Error("Failed to update task status",
 				slog.String("jobId", jobId),
@@ -253,7 +271,7 @@ func updateTaskStatus(jobId string) TaskStatusUpdateCallback {
 			return
 		}
 
-		if err := mb.PublishTaskStatusUpdate(messagebus.TaskStatusUpdateMessage{
+		if err := mb.PublishTaskStatusUpdate(ctx, messagebus.TaskStatusUpdateMessage{
 			Type:     messagebus.TaskStatusUpdateMessageType,
 			JobID:    jobId,
 			TaskType: string(taskType),
@@ -268,7 +286,7 @@ func updateTaskStatus(jobId string) TaskStatusUpdateCallback {
 	}
 }
 
-func addSubTask(jobId string) AddSubTaskCallback {
+func addSubTask(ctx context.Context, jobId string) AddSubTaskCallback {
 	return func(taskType types.TaskType, key, url string) {
 		subtask := types.SubTask{
 			Type:        types.SubTaskTypeValidatingLink,
@@ -277,7 +295,7 @@ func addSubTask(jobId string) AddSubTaskCallback {
 			Description: "",
 		}
 
-		err := tsk.AddSubTaskByKey(jobId, taskType, key, subtask)
+		err := tsk.AddSubTaskByKey(ctx, jobId, taskType, key, subtask)
 		if err != nil {
 			logger.Error("Failed to add subtask",
 				slog.String("jobId", jobId),
@@ -288,7 +306,7 @@ func addSubTask(jobId string) AddSubTaskCallback {
 			return
 		}
 
-		if err := mb.PublishSubTaskUpdate(messagebus.SubTaskUpdateMessage{
+		if err := mb.PublishSubTaskUpdate(ctx, messagebus.SubTaskUpdateMessage{
 			Type:     messagebus.SubTaskUpdateMessageType,
 			JobID:    jobId,
 			TaskType: string(taskType),
@@ -305,9 +323,9 @@ func addSubTask(jobId string) AddSubTaskCallback {
 	}
 }
 
-func updateSubTaskStatus(jobId string) SubTaskUpdateCallback {
+func updateSubTaskStatus(ctx context.Context, jobId string) SubTaskUpdateCallback {
 	return func(taskType types.TaskType, key string, subtask types.SubTask) {
-		err := tsk.UpdateSubTaskByKey(jobId, taskType, key, subtask)
+		err := tsk.UpdateSubTaskByKey(ctx, jobId, taskType, key, subtask)
 		if err != nil {
 			logger.Error("Failed to update subtask",
 				slog.String("jobId", jobId),
@@ -320,7 +338,7 @@ func updateSubTaskStatus(jobId string) SubTaskUpdateCallback {
 			return
 		}
 
-		if err := mb.PublishSubTaskUpdate(messagebus.SubTaskUpdateMessage{
+		if err := mb.PublishSubTaskUpdate(ctx, messagebus.SubTaskUpdateMessage{
 			Type:     messagebus.SubTaskUpdateMessageType,
 			JobID:    jobId,
 			TaskType: string(taskType),

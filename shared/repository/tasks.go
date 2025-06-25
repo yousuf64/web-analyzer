@@ -1,7 +1,9 @@
 package repository
 
 import (
+	"context"
 	"errors"
+	"shared/tracing"
 	"shared/types"
 	"strings"
 	"time"
@@ -35,14 +37,14 @@ func NewTaskRepository(mc MetricsCollector) (*TaskRepository, error) {
 	}, nil
 }
 
-// NewTaskRepositoryWithoutMetrics creates a new TaskRepository without metrics collection
-func NewTaskRepositoryWithoutMetrics() (*TaskRepository, error) {
-	return NewTaskRepository(NoOpMetricsCollector{})
-}
-
-func (t *TaskRepository) CreateTasks(tasks ...*types.Task) (err error) {
+func (t *TaskRepository) CreateTasks(ctx context.Context, tasks ...*types.Task) (err error) {
 	start := time.Now()
-	defer t.mc.RecordDatabaseOperation("batch_create", TasksTableName, start, err)
+	_, span := tracing.CreateDatabaseSpan(ctx, "create_tasks", TasksTableName)
+
+	defer func() {
+		t.mc.RecordDatabaseOperation("create_tasks", TasksTableName, start, err)
+		span.Close(err)
+	}()
 
 	if len(tasks) == 0 {
 		return nil
@@ -84,9 +86,14 @@ func (t *TaskRepository) CreateTasks(tasks ...*types.Task) (err error) {
 	return nil
 }
 
-func (t *TaskRepository) UpdateTaskStatus(jobId string, taskType types.TaskType, status types.TaskStatus) (err error) {
+func (t *TaskRepository) UpdateTaskStatus(ctx context.Context, jobId string, taskType types.TaskType, status types.TaskStatus) (err error) {
 	start := time.Now()
-	defer t.mc.RecordDatabaseOperation("update", TasksTableName, start, err)
+	_, span := tracing.CreateDatabaseSpan(ctx, "update_task_status", TasksTableName)
+
+	defer func() {
+		t.mc.RecordDatabaseOperation("update_task_status", TasksTableName, start, err)
+		span.Close(err)
+	}()
 
 	input := &dynamodb.UpdateItemInput{
 		TableName: aws.String(TasksTableName),
@@ -113,9 +120,14 @@ func (t *TaskRepository) UpdateTaskStatus(jobId string, taskType types.TaskType,
 	return err
 }
 
-func (t *TaskRepository) AddSubTaskByKey(jobId string, taskType types.TaskType, key string, subtask types.SubTask) (err error) {
+func (t *TaskRepository) AddSubTaskByKey(ctx context.Context, jobId string, taskType types.TaskType, key string, subtask types.SubTask) (err error) {
 	start := time.Now()
-	defer t.mc.RecordDatabaseOperation("update", TasksTableName, start, err)
+	_, span := tracing.CreateDatabaseSpan(ctx, "add_subtask", TasksTableName)
+
+	defer func() {
+		t.mc.RecordDatabaseOperation("add_subtask", TasksTableName, start, err)
+		span.Close(err)
+	}()
 
 	subtaskItem, err := dynamodbattribute.MarshalMap(subtask)
 	if err != nil {
@@ -148,9 +160,14 @@ func (t *TaskRepository) AddSubTaskByKey(jobId string, taskType types.TaskType, 
 	return err
 }
 
-func (t *TaskRepository) UpdateSubTaskByKey(jobId string, taskType types.TaskType, key string, subtask types.SubTask) (err error) {
+func (t *TaskRepository) UpdateSubTaskByKey(ctx context.Context, jobId string, taskType types.TaskType, key string, subtask types.SubTask) (err error) {
 	start := time.Now()
-	defer t.mc.RecordDatabaseOperation("update", TasksTableName, start, err)
+	_, span := tracing.CreateDatabaseSpan(ctx, "update_subtask", TasksTableName)
+
+	defer func() {
+		t.mc.RecordDatabaseOperation("update_subtask", TasksTableName, start, err)
+		span.Close(err)
+	}()
 
 	subtaskItem, err := dynamodbattribute.MarshalMap(subtask)
 	if err != nil {
@@ -191,9 +208,14 @@ func (t *TaskRepository) UpdateSubTaskByKey(jobId string, taskType types.TaskTyp
 	return nil
 }
 
-func (t *TaskRepository) GetTasksByJobId(jobId string) (tasks []types.Task, err error) {
+func (t *TaskRepository) GetTasksByJobId(ctx context.Context, jobId string) (tasks []types.Task, err error) {
 	start := time.Now()
-	defer t.mc.RecordDatabaseOperation("query", TasksTableName, start, err)
+	_, span := tracing.CreateDatabaseSpan(ctx, "query_tasks_by_job_id", TasksTableName)
+
+	defer func() {
+		t.mc.RecordDatabaseOperation("query_tasks_by_job_id", TasksTableName, start, err)
+		span.Close(err)
+	}()
 
 	input := &dynamodb.QueryInput{
 		TableName:              aws.String(TasksTableName),

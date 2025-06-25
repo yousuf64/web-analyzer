@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -45,7 +46,7 @@ type Analyzer struct {
 	SubTaskUpdateCallback    SubTaskUpdateCallback
 }
 
-func NewAnalyzer(m metrics.AnalyzerMetricsInterface) *Analyzer {
+func NewAnalyzer(hc *http.Client, m metrics.AnalyzerMetricsInterface) *Analyzer {
 	if m == nil {
 		m = metrics.NewNoopAnalyzerMetrics()
 	}
@@ -53,7 +54,7 @@ func NewAnalyzer(m metrics.AnalyzerMetricsInterface) *Analyzer {
 	return &Analyzer{
 		headings:                 make(map[string]int),
 		links:                    []string{},
-		hc:                       &http.Client{Timeout: httpClientTimeout},
+		hc:                       hc,
 		mc:                       m,
 		TaskStatusUpdateCallback: func(taskType types.TaskType, status types.TaskStatus) {},
 		AddSubTaskCallback:       func(taskType types.TaskType, key, url string) {},
@@ -61,7 +62,7 @@ func NewAnalyzer(m metrics.AnalyzerMetricsInterface) *Analyzer {
 	}
 }
 
-func (a *Analyzer) AnalyzeHTML(content string) (types.AnalyzeResult, error) {
+func (a *Analyzer) AnalyzeHTML(ctx context.Context, content string) (types.AnalyzeResult, error) {
 	doc, err := a.parseHTML(content)
 	if err != nil {
 		return types.AnalyzeResult{}, errors.Join(err, errors.New("failed to parse HTML"))
@@ -69,7 +70,7 @@ func (a *Analyzer) AnalyzeHTML(content string) (types.AnalyzeResult, error) {
 
 	a.htmlVersion = a.detectHtmlVersion(content)
 	a.analyzeContent(doc)
-	a.verifyLinks()
+	a.verifyLinks(ctx)
 
 	return types.AnalyzeResult{
 		HtmlVersion:       a.htmlVersion,
@@ -275,7 +276,7 @@ func (a *Analyzer) dfsFormInputs(n *html.Node, hasPassword, hasEmail *bool) {
 	}
 }
 
-func (a *Analyzer) verifyLinks() {
+func (a *Analyzer) verifyLinks(ctx context.Context) {
 	taskStart := time.Now()
 	a.TaskStatusUpdateCallback(types.TaskTypeVerifyingLinks, types.TaskStatusRunning)
 	defer func() {
@@ -306,7 +307,7 @@ func (a *Analyzer) verifyLinks() {
 			slog.String("url", link))
 
 		wg.Add(1)
-		go func(link, key string) {
+		go func(ctx context.Context, link, key string) {
 			defer wg.Done()
 
 			semaphore <- struct{}{}
@@ -321,7 +322,7 @@ func (a *Analyzer) verifyLinks() {
 			})
 
 			linkVerifyStart := time.Now()
-			status, description := a.verifyLink(link)
+			status, description := a.verifyLink(ctx, link)
 			linkVerifyDuration := time.Since(linkVerifyStart).Seconds()
 
 			a.SubTaskUpdateCallback(types.TaskTypeVerifyingLinks, key, types.SubTask{
@@ -339,14 +340,14 @@ func (a *Analyzer) verifyLinks() {
 
 			a.mc.RecordLinkVerification(status == types.TaskStatusCompleted, linkVerifyDuration)
 
-		}(link, key)
+		}(ctx, link, key)
 	}
 
 	wg.Wait()
 	logger.Info("Completed link verification", slog.Int("linkCount", linkCount))
 }
 
-func (a *Analyzer) verifyLink(link string) (types.TaskStatus, string) {
+func (a *Analyzer) verifyLink(ctx context.Context, link string) (types.TaskStatus, string) {
 	parsedURL, err := url.Parse(link)
 	if err != nil {
 		errMsg := fmt.Sprintf("Invalid URL: %s", err.Error())
@@ -365,7 +366,7 @@ func (a *Analyzer) verifyLink(link string) (types.TaskStatus, string) {
 		return types.TaskStatusSkipped, description
 	}
 
-	req, err := http.NewRequest(http.MethodHead, link, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, link, nil)
 	if err != nil {
 		errMsg := fmt.Sprintf("Request creation failed: %s", err.Error())
 		logger.Error("Failed to create request",

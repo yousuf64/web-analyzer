@@ -1,8 +1,10 @@
 package messagebus
 
 import (
+	"context"
 	"encoding/json"
 	"log"
+	"shared/tracing"
 	"shared/types"
 	"time"
 
@@ -75,7 +77,7 @@ func NewWithoutMetrics(nc *nats.Conn) *MessageBus {
 	return New(nc, NoOpMetricsCollector{})
 }
 
-func (b *MessageBus) PublishAnalyzeMessage(m AnalyzeMessage) (err error) {
+func (b *MessageBus) PublishAnalyzeMessage(ctx context.Context, m AnalyzeMessage) (err error) {
 	defer func() {
 		b.metrics.RecordNATSPublish(string(AnalyzeMessageType), err == nil)
 	}()
@@ -87,11 +89,11 @@ func (b *MessageBus) PublishAnalyzeMessage(m AnalyzeMessage) (err error) {
 		return err
 	}
 
-	err = b.nc.Publish(string(AnalyzeMessageType), data)
+	err = b.publishMsg(ctx, data, AnalyzeMessageType)
 	return err
 }
 
-func (b *MessageBus) PublishJobUpdate(m JobUpdateMessage) (err error) {
+func (b *MessageBus) PublishJobUpdate(ctx context.Context, m JobUpdateMessage) (err error) {
 	defer func() {
 		b.metrics.RecordNATSPublish(string(JobUpdateMessageType), err == nil)
 	}()
@@ -103,14 +105,14 @@ func (b *MessageBus) PublishJobUpdate(m JobUpdateMessage) (err error) {
 		return err
 	}
 
-	err = b.nc.Publish(string(JobUpdateMessageType), data)
+	err = b.publishMsg(ctx, data, JobUpdateMessageType)
 	if err != nil {
 		log.Printf("Failed to publish job update: %v", err)
 	}
 	return err
 }
 
-func (b *MessageBus) PublishTaskStatusUpdate(m TaskStatusUpdateMessage) (err error) {
+func (b *MessageBus) PublishTaskStatusUpdate(ctx context.Context, m TaskStatusUpdateMessage) (err error) {
 	defer func() {
 		b.metrics.RecordNATSPublish(string(TaskStatusUpdateMessageType), err == nil)
 	}()
@@ -122,14 +124,14 @@ func (b *MessageBus) PublishTaskStatusUpdate(m TaskStatusUpdateMessage) (err err
 		return err
 	}
 
-	err = b.nc.Publish(string(TaskStatusUpdateMessageType), data)
+	err = b.publishMsg(ctx, data, TaskStatusUpdateMessageType)
 	if err != nil {
 		log.Printf("Failed to publish task status update: %v", err)
 	}
 	return err
 }
 
-func (b *MessageBus) PublishSubTaskUpdate(m SubTaskUpdateMessage) (err error) {
+func (b *MessageBus) PublishSubTaskUpdate(ctx context.Context, m SubTaskUpdateMessage) (err error) {
 	defer func() {
 		b.metrics.RecordNATSPublish(string(SubTaskUpdateMessageType), err == nil)
 	}()
@@ -141,16 +143,60 @@ func (b *MessageBus) PublishSubTaskUpdate(m SubTaskUpdateMessage) (err error) {
 		return err
 	}
 
-	err = b.nc.Publish(string(SubTaskUpdateMessageType), data)
+	err = b.publishMsg(ctx, data, SubTaskUpdateMessageType)
 	if err != nil {
 		log.Printf("Failed to publish subtask update: %v", err)
 	}
 	return err
 }
 
-// wrapHandler wraps the original handler to automatically record receive metrics
-func (b *MessageBus) wrapHandler(messageType MessageType, handler nats.MsgHandler) nats.MsgHandler {
+// publishMsg publishes a message to NATS with trace context in headers
+func (b *MessageBus) publishMsg(ctx context.Context, data []byte, messageType MessageType) (err error) {
+	ctx, span := tracing.CreateNATSPublishSpan(ctx, string(messageType))
+	defer span.End()
+
+	msg := &nats.Msg{
+		Subject: string(messageType),
+		Data:    data,
+		Header:  make(nats.Header),
+	}
+
+	tracing.InjectNATSHeaders(ctx, msg)
+
+	err = b.nc.PublishMsg(msg)
+	if err != nil {
+		tracing.SetError(ctx, err)
+	}
+	return err
+}
+
+func (b *MessageBus) SubscribeToAnalyzeMessage(handler func(ctx context.Context, m *nats.Msg)) (*nats.Subscription, error) {
+	h := b.wrapHandler(AnalyzeMessageType, handler)
+	return b.nc.Subscribe(string(AnalyzeMessageType), h)
+}
+
+func (b *MessageBus) SubscribeToJobUpdate(handler func(ctx context.Context, m *nats.Msg)) (*nats.Subscription, error) {
+	h := b.wrapHandler(JobUpdateMessageType, handler)
+	return b.nc.Subscribe(string(JobUpdateMessageType), h)
+}
+
+func (b *MessageBus) SubscribeToTaskStatusUpdate(handler func(ctx context.Context, m *nats.Msg)) (*nats.Subscription, error) {
+	h := b.wrapHandler(TaskStatusUpdateMessageType, handler)
+	return b.nc.Subscribe(string(TaskStatusUpdateMessageType), h)
+}
+
+func (b *MessageBus) SubscribeToSubTaskUpdate(handler func(ctx context.Context, m *nats.Msg)) (*nats.Subscription, error) {
+	h := b.wrapHandler(SubTaskUpdateMessageType, handler)
+	return b.nc.Subscribe(string(SubTaskUpdateMessageType), h)
+}
+
+// wrapHandler wraps the original handler to automatically inject trace context and record receive metrics
+func (b *MessageBus) wrapHandler(messageType MessageType, handler func(ctx context.Context, m *nats.Msg)) nats.MsgHandler {
 	return func(m *nats.Msg) {
+		ctx := tracing.ExtractNATSHeaders(context.Background(), m)
+		ctx, span := tracing.CreateNATSConsumeSpan(ctx, m.Subject)
+		defer span.End()
+
 		start := time.Now()
 		defer func() {
 			if r := recover(); r != nil {
@@ -163,26 +209,6 @@ func (b *MessageBus) wrapHandler(messageType MessageType, handler nats.MsgHandle
 			}
 		}()
 
-		handler(m)
+		handler(ctx, m)
 	}
-}
-
-func (b *MessageBus) SubscribeToAnalyzeMessage(handler func(m *nats.Msg)) (*nats.Subscription, error) {
-	h := b.wrapHandler(AnalyzeMessageType, handler)
-	return b.nc.Subscribe(string(AnalyzeMessageType), h)
-}
-
-func (b *MessageBus) SubscribeToJobUpdate(handler func(m *nats.Msg)) (*nats.Subscription, error) {
-	h := b.wrapHandler(JobUpdateMessageType, handler)
-	return b.nc.Subscribe(string(JobUpdateMessageType), h)
-}
-
-func (b *MessageBus) SubscribeToTaskStatusUpdate(handler func(m *nats.Msg)) (*nats.Subscription, error) {
-	h := b.wrapHandler(TaskStatusUpdateMessageType, handler)
-	return b.nc.Subscribe(string(TaskStatusUpdateMessageType), h)
-}
-
-func (b *MessageBus) SubscribeToSubTaskUpdate(handler func(m *nats.Msg)) (*nats.Subscription, error) {
-	h := b.wrapHandler(SubTaskUpdateMessageType, handler)
-	return b.nc.Subscribe(string(SubTaskUpdateMessageType), h)
 }

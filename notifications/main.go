@@ -11,6 +11,7 @@ import (
 	"shared/log"
 	"shared/messagebus"
 	"shared/metrics"
+	"shared/tracing"
 	"slices"
 	"sync"
 	"syscall"
@@ -122,7 +123,7 @@ func broadcastToUsers(message any, group string) {
 func setupSubscriptions(nc *nats.Conn) {
 	mb := messagebus.New(nc, mc)
 
-	sub, err := mb.SubscribeToJobUpdate(func(msg *nats.Msg) {
+	sub, err := mb.SubscribeToJobUpdate(func(ctx context.Context, msg *nats.Msg) {
 		var m messagebus.JobUpdateMessage
 		if err := json.Unmarshal(msg.Data, &m); err != nil {
 			logger.Error("Failed to unmarshal job update", slog.Any("error", err))
@@ -137,7 +138,7 @@ func setupSubscriptions(nc *nats.Conn) {
 	}
 	subscriptions = append(subscriptions, sub)
 
-	sub, err = mb.SubscribeToTaskStatusUpdate(func(msg *nats.Msg) {
+	sub, err = mb.SubscribeToTaskStatusUpdate(func(ctx context.Context, msg *nats.Msg) {
 		var m messagebus.TaskStatusUpdateMessage
 		if err := json.Unmarshal(msg.Data, &m); err != nil {
 			logger.Error("Failed to unmarshal task update", slog.Any("error", err))
@@ -153,7 +154,7 @@ func setupSubscriptions(nc *nats.Conn) {
 	}
 	subscriptions = append(subscriptions, sub)
 
-	sub, err = mb.SubscribeToSubTaskUpdate(func(msg *nats.Msg) {
+	sub, err = mb.SubscribeToSubTaskUpdate(func(ctx context.Context, msg *nats.Msg) {
 		var m messagebus.SubTaskUpdateMessage
 		if err := json.Unmarshal(msg.Data, &m); err != nil {
 			logger.Error("Failed to unmarshal subtask update", slog.Any("error", err))
@@ -270,6 +271,14 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 func main() {
 	logger = log.SetupFromEnv("notifications")
 	logger.Info("Starting notifications service")
+
+	ctx := context.Background()
+	otelShutdown, err := tracing.SetupOTelSDK(ctx, "notifications")
+	if err != nil {
+		logger.Error("Failed to setup OTel SDK", slog.Any("error", err))
+		os.Exit(1)
+	}
+	defer otelShutdown(ctx)
 
 	// Initialize metrics
 	mc = metrics.NewNotificationsMetrics()

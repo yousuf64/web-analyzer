@@ -2,10 +2,8 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/json"
-	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,26 +12,33 @@ import (
 	"shared/messagebus"
 	"shared/metrics"
 	"shared/repository"
-	"shared/types"
-	"sync"
+	"shared/tracing"
 	"syscall"
 	"time"
 
 	"github.com/nats-io/nats.go"
-	"github.com/oklog/ulid/v2"
 	"github.com/yousuf64/shift"
 )
 
 var (
-	jobRepo    *repository.JobRepository
-	taskRepo   *repository.TaskRepository
-	logger     *slog.Logger
-	mc         *metrics.APIMetrics
+	jobRepo  *repository.JobRepository
+	taskRepo *repository.TaskRepository
+	logger   *slog.Logger
+	mc       *metrics.APIMetrics
+	mb       *messagebus.MessageBus
 )
 
 func main() {
 	logger = log.SetupFromEnv("api")
 	logger.Info("Starting API service")
+
+	ctx := context.Background()
+	otelShutdown, err := tracing.SetupOTelSDK(ctx, "api")
+	if err != nil {
+		logger.Error("Failed to setup tracing", slog.Any("error", err))
+		os.Exit(1)
+	}
+	defer otelShutdown(ctx)
 
 	// Initialize metrics
 	mc = metrics.NewAPIMetrics()
@@ -78,9 +83,10 @@ func main() {
 	}
 	defer nc.Close()
 
-	mb := messagebus.New(nc, mc)
+	mb = messagebus.New(nc, mc)
 
 	router := shift.New()
+	router.Use(tracing.OtelMiddleware)
 	router.Use(corsMiddleware)
 	router.Use(mc.HTTPMiddleware)
 	router.Use(errorMiddleware)
@@ -91,84 +97,14 @@ func main() {
 		return nil
 	})
 
-	router.POST("/analyze", func(w http.ResponseWriter, r *http.Request, route shift.Route) (err error) {
-		jobCreationStart := time.Now()
-		defer func() {
-			mc.RecordJobCreation(err == nil, time.Since(jobCreationStart))
-		}()
-
-		var req types.AnalyzeRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			return errors.Join(err, errors.New("failed to decode request"))
-		}
-
-		jobId := generateId()
-		logger.Info("Creating new analysis job",
-			slog.String("jobId", jobId),
-			slog.String("url", req.Url))
-
-		job := &types.Job{
-			ID:        jobId,
-			URL:       req.Url,
-			Status:    types.JobStatusPending,
-			CreatedAt: time.Now().UTC(),
-			UpdatedAt: time.Now().UTC(),
-		}
-
-		if err := jobRepo.CreateJob(job); err != nil {
-			return errors.Join(err, errors.New("failed to create job"))
-		}
-
-		defaultTasks := getDefaultTasks(jobId)
-		if err := taskRepo.CreateTasks(defaultTasks...); err != nil {
-			return errors.Join(err, errors.New("failed to create tasks"))
-		}
-
-		if err := mb.PublishAnalyzeMessage(messagebus.AnalyzeMessage{
-			Type:  messagebus.AnalyzeMessageType,
-			JobId: jobId,
-		}); err != nil {
-			return errors.Join(err, errors.New("failed to publish analyze message"))
-		}
-
-		logger.Info("Analysis request published",
-			slog.String("jobId", jobId),
-			slog.String("url", req.Url))
-
-		w.WriteHeader(http.StatusAccepted)
-		return json.NewEncoder(w).Encode(types.AnalyzeResponse{
-			Job: *job,
-		})
-	})
-
-	router.GET("/jobs", func(w http.ResponseWriter, r *http.Request, route shift.Route) error {
-		jobs, err := jobRepo.GetAllJobs()
-		if err != nil {
-			return errors.Join(err, errors.New("failed to get jobs"))
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		return json.NewEncoder(w).Encode(jobs)
-	})
-
-	router.GET("/jobs/:job_id/tasks", func(w http.ResponseWriter, r *http.Request, route shift.Route) error {
-		jobId := route.Params.Get("job_id")
-		if jobId == "" {
-			return errors.New("job_id is required")
-		}
-
-		tasks, err := taskRepo.GetTasksByJobId(jobId)
-		if err != nil {
-			return errors.Join(err, errors.New("failed to get tasks"))
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		return json.NewEncoder(w).Encode(tasks)
-	})
+	router.POST("/analyze", handleAnalyze)
+	router.GET("/jobs", handleGetJobs)
+	router.GET("/jobs/:job_id/tasks", handleGetTasksByJobId)
 
 	srv := &http.Server{
-		Addr:    ":8080",
-		Handler: router.Serve(),
+		Addr:        ":8080",
+		Handler:     router.Serve(),
+		BaseContext: func(_ net.Listener) context.Context { return ctx },
 	}
 
 	go func() {
@@ -194,47 +130,4 @@ func main() {
 	}
 
 	logger.Info("Server gracefully stopped")
-}
-
-// entropyPool provides a pool of monotonic entropy sources for ULID generation
-// This allows for better performance in concurrent scenarios by avoiding lock contention
-var entropyPool = sync.Pool{
-	New: func() any {
-		return ulid.Monotonic(rand.Reader, 0)
-	},
-}
-
-func generateId() string {
-	e := entropyPool.Get().(*ulid.MonotonicEntropy)
-
-	ts := ulid.Timestamp(time.Now())
-	id := ulid.MustNew(ts, e)
-
-	entropyPool.Put(e)
-	return id.String()
-}
-
-func getDefaultTasks(jobId string) []*types.Task {
-	return []*types.Task{
-		{
-			JobID:  jobId,
-			Type:   types.TaskTypeExtracting,
-			Status: types.TaskStatusPending,
-		},
-		{
-			JobID:  jobId,
-			Type:   types.TaskTypeIdentifyingVersion,
-			Status: types.TaskStatusPending,
-		},
-		{
-			JobID:  jobId,
-			Type:   types.TaskTypeAnalyzing,
-			Status: types.TaskStatusPending,
-		},
-		{
-			JobID:  jobId,
-			Type:   types.TaskTypeVerifyingLinks,
-			Status: types.TaskStatusPending,
-		},
-	}
 }
