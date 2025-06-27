@@ -4,8 +4,13 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +20,145 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/yousuf64/shift"
 )
+
+var validHostnameRegex = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$`)
+
+// validateURL checks if the URL is valid and secure, and returns the normalized URL
+func validateURL(rawURL string) (string, error) {
+	if rawURL == "" {
+		return "", errors.New("url is required")
+	}
+
+	// Remove leading/trailing whitespace
+	rawURL = strings.TrimSpace(rawURL)
+
+	// Check for maximum URL length (reasonable limit)
+	if len(rawURL) > 2048 {
+		return "", errors.New("url too long (max 2048 characters)")
+	}
+
+	// Add https:// if no scheme is present
+	if !strings.Contains(rawURL, "://") {
+		rawURL = "https://" + rawURL
+	}
+
+	// Parse the URL
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid url format: %w", err)
+	}
+
+	// Validate scheme - only allow http and https
+	scheme := strings.ToLower(parsedURL.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return "", fmt.Errorf("unsupported scheme '%s': only http and https are allowed", parsedURL.Scheme)
+	}
+
+	// Validate hostname
+	if parsedURL.Host == "" {
+		return "", errors.New("hostname is required")
+	}
+
+	// Extract hostname (without port)
+	hostname := parsedURL.Hostname()
+	if hostname == "" {
+		return "", errors.New("invalid hostname")
+	}
+
+	// Validate hostname format
+	if err := validateHostname(hostname); err != nil {
+		return "", fmt.Errorf("invalid hostname: %w", err)
+	}
+
+	// Check for path traversal patterns
+	if strings.Contains(parsedURL.Path, "..") {
+		return "", errors.New("path traversal patterns are not allowed")
+	}
+
+	return parsedURL.String(), nil
+}
+
+// validateHostname validates the hostname according to RFC standards and security considerations
+func validateHostname(hostname string) error {
+	// Check for localhost and loopback addresses
+	if isLocalhost(hostname) {
+		return errors.New("localhost and loopback addresses are not allowed")
+	}
+
+	// Check for private IP addresses
+	if isPrivateIP(hostname) {
+		return errors.New("private IP addresses are not allowed")
+	}
+
+	// Validate hostname format using regex
+	if !validHostnameRegex.MatchString(hostname) {
+		// If it's not a valid hostname, check if it's a valid IP
+		if net.ParseIP(hostname) == nil {
+			return errors.New("invalid hostname or IP address format")
+		}
+	}
+
+	// Additional length check for hostname
+	if len(hostname) > 253 {
+		return errors.New("hostname too long (max 253 characters)")
+	}
+
+	return nil
+}
+
+// isLocalhost checks if the hostname is localhost or loopback
+func isLocalhost(hostname string) bool {
+	localhost := []string{
+		"localhost",
+		"127.0.0.1",
+		"::1",
+		"0.0.0.0",
+	}
+
+	hostname = strings.ToLower(hostname)
+	for _, local := range localhost {
+		if hostname == local {
+			return true
+		}
+	}
+
+	// Check for localhost variations
+	if strings.HasSuffix(hostname, ".localhost") {
+		return true
+	}
+
+	return false
+}
+
+// isPrivateIP checks if the hostname is a private IP address
+func isPrivateIP(hostname string) bool {
+	ip := net.ParseIP(hostname)
+	if ip == nil {
+		return false
+	}
+
+	// Check for private IP ranges
+	privateRanges := []string{
+		"10.0.0.0/8",     // RFC1918
+		"172.16.0.0/12",  // RFC1918
+		"192.168.0.0/16", // RFC1918
+		"169.254.0.0/16", // RFC3927 (link-local)
+		"fc00::/7",       // RFC4193 (IPv6 private)
+		"fe80::/10",      // RFC4291 (IPv6 link-local)
+	}
+
+	for _, cidr := range privateRanges {
+		_, network, err := net.ParseCIDR(cidr)
+		if err != nil {
+			continue
+		}
+		if network.Contains(ip) {
+			return true
+		}
+	}
+
+	return false
+}
 
 func handleAnalyze(w http.ResponseWriter, r *http.Request, route shift.Route) (err error) {
 	ctx := r.Context()
@@ -28,6 +172,13 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request, route shift.Route) (e
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return errors.Join(err, errors.New("failed to decode request"))
 	}
+
+	// Validate and normalize the URL
+	validatedURL, err := validateURL(req.Url)
+	if err != nil {
+		return fmt.Errorf("url validation failed: %w", err)
+	}
+	req.Url = validatedURL
 
 	jobId := generateId()
 	logger.Info("Creating new analysis job",

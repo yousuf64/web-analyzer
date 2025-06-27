@@ -19,14 +19,7 @@ export function UrlInput({ onJobCreated }: UrlInputProps) {
       setError('Please enter a URL');
       return;
     }
-
-    try {
-      new URL(url);
-    } catch {
-      setError('Please enter a valid URL');
-      return;
-    }
-
+    
     try {
       const response = await ApiService.createAnalyzeJob(url);
       onJobCreated(response.job);
@@ -42,7 +35,7 @@ export function UrlInput({ onJobCreated }: UrlInputProps) {
     <form onSubmit={handleSubmit} className="flex flex-col gap-2">
       <div className="flex gap-2">
         <input
-          type="url"
+          type="text"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="Enter URL to analyze"
