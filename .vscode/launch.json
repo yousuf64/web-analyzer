@@ -1,0 +1,32 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug API Service",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}/api",
+            "env": {},
+            "args": []
+        },
+        {
+            "name": "Debug Analyzer Service",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}/analyzer",
+            "env": {},
+            "args": []
+        },
+        {
+            "name": "Debug Notifications Service",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}/notifications",
+            "env": {},
+            "args": []
+        }
+    ]
+} 
