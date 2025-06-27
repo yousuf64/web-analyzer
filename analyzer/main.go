@@ -202,9 +202,9 @@ func analyzeUrl(ctx context.Context, am messagebus.AnalyzeMessage) (err error) {
 
 	an := NewAnalyzer(h, mc)
 	an.SetBaseUrl(job.URL)
-	an.TaskStatusUpdateCallback = updateTaskStatus(ctx, am.JobId)
-	an.AddSubTaskCallback = addSubTask(ctx, am.JobId)
-	an.SubTaskUpdateCallback = updateSubTaskStatus(ctx, am.JobId)
+	an.TaskStatusUpdateFunc = updateTaskStatus(ctx, am.JobId)
+	an.AddSubTaskFunc = addSubTask(ctx, am.JobId)
+	an.SubTaskUpdateFunc = updateSubTaskStatus(ctx, am.JobId)
 
 	res, err := an.AnalyzeHTML(ctx, c)
 	if err != nil {
@@ -259,7 +259,7 @@ func fetchContent(ctx context.Context, url string) (string, error) {
 	return string(b), nil
 }
 
-func updateTaskStatus(ctx context.Context, jobId string) TaskStatusUpdateCallback {
+func updateTaskStatus(ctx context.Context, jobId string) TaskStatusUpdateFunc {
 	return func(taskType types.TaskType, status types.TaskStatus) {
 		err := tsk.UpdateTaskStatus(ctx, jobId, taskType, status)
 		if err != nil {
@@ -286,7 +286,7 @@ func updateTaskStatus(ctx context.Context, jobId string) TaskStatusUpdateCallbac
 	}
 }
 
-func addSubTask(ctx context.Context, jobId string) AddSubTaskCallback {
+func addSubTask(ctx context.Context, jobId string) AddSubTaskFunc {
 	return func(taskType types.TaskType, key, url string) {
 		subtask := types.SubTask{
 			Type:        types.SubTaskTypeValidatingLink,
@@ -323,7 +323,7 @@ func addSubTask(ctx context.Context, jobId string) AddSubTaskCallback {
 	}
 }
 
-func updateSubTaskStatus(ctx context.Context, jobId string) SubTaskUpdateCallback {
+func updateSubTaskStatus(ctx context.Context, jobId string) SubTaskUpdateFunc {
 	return func(taskType types.TaskType, key string, subtask types.SubTask) {
 		err := tsk.UpdateSubTaskByKey(ctx, jobId, taskType, key, subtask)
 		if err != nil {
