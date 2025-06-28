@@ -10,7 +10,7 @@ type Config struct {
 	HTTP     config.HTTPClientConfig
 	Metrics  config.MetricsConfig
 	Tracing  config.TracingConfig
-	Database config.DatabaseConfig
+	DynamoDB config.DynamoDBConfig
 	NATS     config.NATSConfig
 }
 
@@ -21,7 +21,7 @@ func Load() *Config {
 		HTTP:     config.NewHTTPClientConfig(),
 		Metrics:  config.NewMetricsConfig("9091"),
 		Tracing:  config.NewTracingConfig("analyzer"),
-		Database: config.DatabaseConfig{},
+		DynamoDB: config.NewDynamoDBConfig(),
 		NATS:     config.NewNATSConfig(),
 	}
 }

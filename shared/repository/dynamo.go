@@ -2,6 +2,7 @@ package repository
 
 import (
 	"log/slog"
+	"shared/config"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -10,14 +11,14 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 )
 
-func NewDynamoDBClient() (*dynamodb.DynamoDB, error) {
+func NewDynamoDBClient(cfg config.DynamoDBConfig) (*dynamodb.DynamoDB, error) {
 	sess, err := session.NewSession(&aws.Config{
-		Region:   aws.String("us-east-1"),
-		Endpoint: aws.String("http://localhost:8000"),
+		Region:   aws.String(cfg.Region),
+		Endpoint: aws.String(cfg.Endpoint),
 		Credentials: credentials.NewCredentials(&credentials.StaticProvider{
 			Value: credentials.Value{
-				AccessKeyID:     "DUMMYIDEXAMPLE",
-				SecretAccessKey: "DUMMYIDEXAMPLE",
+				AccessKeyID:     cfg.AccessKeyID,
+				SecretAccessKey: cfg.SecretAccessKey,
 			},
 		}),
 	})
@@ -29,16 +30,13 @@ func NewDynamoDBClient() (*dynamodb.DynamoDB, error) {
 	return client, nil
 }
 
-func SeedTables(client *dynamodb.DynamoDB, mc MetricsCollector) error {
-	jobsTableName := "web-analyzer-jobs"
-	tasksTableName := "web-analyzer-tasks"
-
-	err := createJobsTableIfNotExists(client, jobsTableName, mc)
+func SeedTables(client *dynamodb.DynamoDB, cfg config.DynamoDBConfig, mc MetricsCollector) error {
+	err := createJobsTableIfNotExists(client, JobsTableName, mc)
 	if err != nil {
 		return err
-	}
+	}	
 
-	err = createTasksTableIfNotExists(client, tasksTableName, mc)
+	err = createTasksTableIfNotExists(client, TasksTableName, mc)
 	if err != nil {
 		return err
 	}

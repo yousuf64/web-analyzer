@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"shared/config"
 	"shared/models"
 	"shared/tracing"
 	"strings"
@@ -20,8 +21,8 @@ type JobRepository struct {
 	mc  MetricsCollector
 }
 
-func NewJobRepository(mc MetricsCollector) (*JobRepository, error) {
-	ddb, err := NewDynamoDBClient()
+func NewJobRepository(cfg config.DynamoDBConfig, mc MetricsCollector) (*JobRepository, error) {
+	ddb, err := NewDynamoDBClient(cfg)
 	if err != nil {
 		return nil, err
 	}

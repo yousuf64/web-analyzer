@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"shared/config"
 	"shared/models"
 	"shared/tracing"
 	"time"
@@ -19,8 +20,8 @@ type TaskRepository struct {
 }
 
 // NewTaskRepository creates a new TaskRepository with the given metrics collector
-func NewTaskRepository(mc MetricsCollector) (*TaskRepository, error) {
-	ddb, err := NewDynamoDBClient()
+func NewTaskRepository(cfg config.DynamoDBConfig, mc MetricsCollector) (*TaskRepository, error) {
+	ddb, err := NewDynamoDBClient(cfg)
 	if err != nil {
 		return nil, err
 	}

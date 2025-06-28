@@ -12,7 +12,6 @@ import (
 type ServiceConfig struct {
 	Name    string
 	Version string
-	Port    string
 }
 
 // MetricsConfig holds metrics server configuration
@@ -27,16 +26,23 @@ type NATSConfig struct {
 
 // TracingConfig holds tracing configuration
 type TracingConfig struct {
-	ServiceName string
+	ServiceName    string
+	ZipkinEndpoint string
+	Environment    string
+	Version        string
 }
 
-// DatabaseConfig holds database configuration
-type DatabaseConfig struct{}
+// DynamoDBConfig holds DynamoDB configuration
+type DynamoDBConfig struct {
+	Region          string
+	Endpoint        string
+	AccessKeyID     string
+	SecretAccessKey string
+}
 
 // HTTPServerConfig holds HTTP server configuration
 type HTTPServerConfig struct {
 	Addr string
-	Port string
 }
 
 // HTTPClientConfig holds HTTP client configuration
@@ -99,7 +105,6 @@ func NewServiceConfig(serviceName string) ServiceConfig {
 	return ServiceConfig{
 		Name:    GetEnv("SERVICE_NAME", serviceName),
 		Version: GetEnv("SERVICE_VERSION", "1.0.0"),
-		Port:    GetEnv("PORT", "8080"),
 	}
 }
 
@@ -120,15 +125,17 @@ func NewNATSConfig() NATSConfig {
 // NewTracingConfig creates a TracingConfig with common defaults
 func NewTracingConfig(serviceName string) TracingConfig {
 	return TracingConfig{
-		ServiceName: GetEnv("TRACING_SERVICE_NAME", serviceName),
+		ServiceName:    GetEnv("TRACING_SERVICE_NAME", serviceName),
+		ZipkinEndpoint: GetEnv("ZIPKIN_ENDPOINT", "http://localhost:9411/api/v2/spans"),
+		Environment:    GetEnv("DEPLOYMENT_ENVIRONMENT", "development"),
+		Version:        GetEnv("SERVICE_VERSION", "1.0.0"),
 	}
 }
 
 // NewHTTPServerConfig creates an HTTPServerConfig with common defaults
-func NewHTTPServerConfig(defaultAddr, defaultPort string) HTTPServerConfig {
+func NewHTTPServerConfig(defaultAddr string) HTTPServerConfig {
 	return HTTPServerConfig{
 		Addr: GetEnv("HTTP_ADDR", defaultAddr),
-		Port: GetEnv("HTTP_PORT", defaultPort),
 	}
 }
 
@@ -146,5 +153,15 @@ func NewWebSocketConfig() WebSocketConfig {
 		MaxConnections: GetIntEnv("WS_MAX_CONNECTIONS", 1000),
 		ReadTimeout:    GetIntEnv("WS_READ_TIMEOUT", 60),
 		WriteTimeout:   GetIntEnv("WS_WRITE_TIMEOUT", 10),
+	}
+}
+
+// NewDynamoDBConfig creates a DynamoDBConfig with common defaults
+func NewDynamoDBConfig() DynamoDBConfig {
+	return DynamoDBConfig{
+		Region:          GetEnv("DYNAMODB_REGION", "us-east-1"),
+		Endpoint:        GetEnv("DYNAMODB_ENDPOINT", "http://localhost:8000"),
+		AccessKeyID:     GetEnv("DYNAMODB_ACCESS_KEY_ID", "DUMMYIDEXAMPLE"),
+		SecretAccessKey: GetEnv("DYNAMODB_SECRET_ACCESS_KEY", "DUMMYIDEXAMPLE"),
 	}
 }

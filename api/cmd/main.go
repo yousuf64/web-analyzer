@@ -21,21 +21,19 @@ import (
 
 func main() {
 	ctx := context.Background()
+	cfg := config.Load()
 
 	// Setup logging
-	logger := log.SetupFromEnv("api")
+	logger := log.SetupFromEnv(cfg.Service.Name)
 	logger.Info("Starting API service")
 
 	// Setup tracing
-	otelShutdown, err := tracing.SetupOTelSDK(ctx, "api")
+	otelShutdown, err := tracing.SetupOTelSDK(ctx, cfg.Tracing)
 	if err != nil {
 		logger.Error("Failed to setup tracing", slog.Any("error", err))
 		os.Exit(1)
 	}
 	defer otelShutdown(ctx)
-
-	// Load configuration
-	cfg := config.Load()
 
 	// Initialize dependencies
 	deps, cleanup, err := initializeDependencies(cfg, logger)
@@ -101,23 +99,23 @@ func initializeDependencies(cfg *config.Config, logger *slog.Logger) (*dependenc
 	metricsServer := m.StartMetricsServer(cfg.Metrics.Port)
 
 	// Initialize DynamoDB client
-	dynamodb, err := repository.NewDynamoDBClient()
+	dynamodb, err := repository.NewDynamoDBClient(cfg.DynamoDB)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// Seed tables
-	if err := repository.SeedTables(dynamodb, m); err != nil {
+	if err := repository.SeedTables(dynamodb, cfg.DynamoDB, m); err != nil {
 		return nil, nil, err
 	}
 
 	// Create repositories
-	jobRepo, err := repository.NewJobRepository(m)
+	jobRepo, err := repository.NewJobRepository(cfg.DynamoDB, m)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	taskRepo, err := repository.NewTaskRepository(m)
+	taskRepo, err := repository.NewTaskRepository(cfg.DynamoDB, m)
 	if err != nil {
 		return nil, nil, err
 	}

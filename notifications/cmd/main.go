@@ -29,9 +29,9 @@ func main() {
 	logger.Info("Starting notifications service")
 
 	// Setup tracing
-	otelShutdown, err := tracing.SetupOTelSDK(ctx, cfg.Service.Name)
+	otelShutdown, err := tracing.SetupOTelSDK(ctx, cfg.Tracing)
 	if err != nil {
-		logger.Error("Failed to setup OTel SDK", slog.Any("error", err))
+		logger.Error("Failed to setup tracing", slog.Any("error", err))
 		os.Exit(1)
 	}
 	defer otelShutdown(ctx)

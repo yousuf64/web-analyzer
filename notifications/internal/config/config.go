@@ -10,6 +10,7 @@ type Config struct {
 	HTTP      config.HTTPServerConfig
 	WebSocket config.WebSocketConfig
 	Metrics   config.MetricsConfig
+	Tracing   config.TracingConfig
 	NATS      config.NATSConfig
 }
 
@@ -17,9 +18,10 @@ type Config struct {
 func Load() *Config {
 	return &Config{
 		Service:   config.NewServiceConfig("notifications"),
-		HTTP:      config.NewHTTPServerConfig(":8081", "8081"),
+		HTTP:      config.NewHTTPServerConfig(":8081"),
 		WebSocket: config.NewWebSocketConfig(),
 		Metrics:   config.NewMetricsConfig("9092"),
+		Tracing:   config.NewTracingConfig("notifications"),
 		NATS:      config.NewNATSConfig(),
 	}
 }

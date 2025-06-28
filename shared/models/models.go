@@ -6,14 +6,14 @@ import (
 
 // Job represents an analysis job domain model
 type Job struct {
-	ID          string
-	URL         string
-	Status      JobStatus
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	StartedAt   *time.Time
-	CompletedAt *time.Time
-	Result      *AnalyzeResult
+	ID          string         `json:"id"`
+	URL         string         `json:"url"`
+	Status      JobStatus      `json:"status"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	StartedAt   *time.Time     `json:"started_at"`
+	CompletedAt *time.Time     `json:"completed_at"`
+	Result      *AnalyzeResult `json:"result"`
 }
 
 // JobStatus represents the overall status of a job
@@ -29,10 +29,10 @@ const (
 
 // Task represents an individual task within a job
 type Task struct {
-	JobID    string
-	Type     TaskType
-	Status   TaskStatus
-	SubTasks map[string]SubTask
+	JobID    string             `json:"job_id"`
+	Type     TaskType           `json:"type"`
+	Status   TaskStatus         `json:"status"`
+	SubTasks map[string]SubTask `json:"sub_tasks"`
 }
 
 // TaskType represents different types of analysis tasks
@@ -58,10 +58,10 @@ const (
 
 // SubTask represents a subtask within a task
 type SubTask struct {
-	Type        SubTaskType
-	Status      TaskStatus
-	URL         string
-	Description string
+	Type        SubTaskType `json:"type"`
+	Status      TaskStatus  `json:"status"`
+	URL         string      `json:"url"`
+	Description string      `json:"description"`
 }
 
 // SubTaskType represents the type of a subtask
@@ -73,13 +73,13 @@ const (
 
 // AnalyzeResult represents the result of an analysis
 type AnalyzeResult struct {
-	HtmlVersion       string
-	PageTitle         string
-	Headings          map[string]int
-	Links             []string
-	InternalLinkCount int
-	ExternalLinkCount int
-	AccessibleLinks   int
-	InaccessibleLinks int
-	HasLoginForm      bool
+	HtmlVersion       string         `json:"html_version"`
+	PageTitle         string         `json:"page_title"`
+	Headings          map[string]int `json:"headings"`
+	Links             []string       `json:"links"`
+	InternalLinkCount int            `json:"internal_link_count"`
+	ExternalLinkCount int            `json:"external_link_count"`
+	AccessibleLinks   int            `json:"accessible_links"`
+	InaccessibleLinks int            `json:"inaccessible_links"`
+	HasLoginForm      bool           `json:"has_login_form"`
 }

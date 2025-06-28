@@ -27,7 +27,7 @@ func main() {
 	log.Info("Starting analyzer service", slog.String("version", cfg.Service.Version))
 
 	ctx := context.Background()
-	shutdown, err := tracing.SetupOTelSDK(ctx, cfg.Tracing.ServiceName)
+	shutdown, err := tracing.SetupOTelSDK(ctx, cfg.Tracing)
 	if err != nil {
 		log.Error("Failed to setup tracing", slog.Any("error", err))
 		os.Exit(1)
@@ -82,18 +82,18 @@ func initializeDependencies(cfg *config.Config) (
 	srv := m.StartMetricsServer(cfg.Metrics.Port)
 
 	// Initialize database
-	ddc, err := repository.NewDynamoDBClient()
+	ddc, err := repository.NewDynamoDBClient(cfg.DynamoDB)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, err
 	}
-	repository.SeedTables(ddc, m)
+	repository.SeedTables(ddc, cfg.DynamoDB, m)
 
-	jobs, err := repository.NewJobRepository(m)
+	jobs, err := repository.NewJobRepository(cfg.DynamoDB, m)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, err
 	}
 
-	tasks, err := repository.NewTaskRepository(m)
+	tasks, err := repository.NewTaskRepository(cfg.DynamoDB, m)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, err
 	}

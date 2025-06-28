@@ -3,6 +3,7 @@ package tracing
 import (
 	"context"
 	"errors"
+	"shared/config"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -42,7 +43,7 @@ func SetError(ctx context.Context, err error) {
 
 // setupOTelSDK bootstraps the OpenTelemetry pipeline.
 // If it does not return an error, make sure to call shutdown for proper cleanup.
-func SetupOTelSDK(ctx context.Context, serviceName string) (shutdown func(context.Context) error, err error) {
+func SetupOTelSDK(ctx context.Context, cfg config.TracingConfig) (shutdown func(context.Context) error, err error) {
 	var shutdownFuncs []func(context.Context) error
 
 	// shutdown calls cleanup functions registered via shutdownFuncs.
@@ -67,14 +68,14 @@ func SetupOTelSDK(ctx context.Context, serviceName string) (shutdown func(contex
 	otel.SetTextMapPropagator(prop)
 
 	// Set up trace provider.
-	tracerProvider, err := newTracerProvider(serviceName)
+	tracerProvider, err := newTracerProvider(cfg)
 	if err != nil {
 		handleErr(err)
 		return
 	}
 	shutdownFuncs = append(shutdownFuncs, tracerProvider.Shutdown)
 	otel.SetTracerProvider(tracerProvider)
-	tracer = tracerProvider.Tracer(serviceName)
+	tracer = tracerProvider.Tracer(cfg.ServiceName)
 
 	return
 }
@@ -86,10 +87,8 @@ func newPropagator() propagation.TextMapPropagator {
 	)
 }
 
-func newTracerProvider(serviceName string) (*sdktrace.TracerProvider, error) {
-	zipkinExporter, err := zipkin.New(
-		"http://localhost:9411/api/v2/spans",
-	)
+func newTracerProvider(cfg config.TracingConfig) (*sdktrace.TracerProvider, error) {
+	zipkinExporter, err := zipkin.New(cfg.ZipkinEndpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -98,9 +97,9 @@ func newTracerProvider(serviceName string) (*sdktrace.TracerProvider, error) {
 		resource.Default(),
 		resource.NewWithAttributes(
 			semconv.SchemaURL,
-			semconv.ServiceName(serviceName),
-			semconv.ServiceVersion("1.0.0"),
-			semconv.DeploymentEnvironmentName("development"),
+			semconv.ServiceName(cfg.ServiceName),
+			semconv.ServiceVersion(cfg.Version),
+			semconv.DeploymentEnvironmentName(cfg.Environment),
 		),
 	)
 	if err != nil {
