@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"time"
 
+	"shared/middleware"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/yousuf64/shift"
@@ -230,16 +232,26 @@ func (m *ServiceMetrics) stopUptimeTracking() {
 }
 
 func (m *ServiceMetrics) StartMetricsServer(port string) *http.Server {
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.Handler())
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	router := shift.New()
+	router.Use(middleware.CORSMiddleware)
+
+	router.GET("/metrics", func(w http.ResponseWriter, r *http.Request, route shift.Route) error {
+		promhttp.Handler().ServeHTTP(w, r)
+		return nil
+	})
+
+	router.GET("/health", func(w http.ResponseWriter, r *http.Request, route shift.Route) error {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
+		return nil
 	})
+
+	// Handle OPTIONS for CORS preflight
+	router.OPTIONS("/*wildcard", middleware.OptionsHandler)
 
 	server := &http.Server{
 		Addr:    ":" + port,
-		Handler: mux,
+		Handler: router.Serve(),
 	}
 
 	server.RegisterOnShutdown(func() {
