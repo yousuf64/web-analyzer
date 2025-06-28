@@ -10,6 +10,7 @@ const (
 	apiServiceName = "api"
 )
 
+// APIMetrics is a struct for API metrics
 type APIMetrics struct {
 	*ServiceMetrics
 
@@ -17,6 +18,7 @@ type APIMetrics struct {
 	JobCreationDuration *prometheus.HistogramVec
 }
 
+// NewAPIMetrics creates a new API metrics
 func NewAPIMetrics() *APIMetrics {
 	baseMetrics := NewServiceMetrics(apiServiceName)
 
@@ -46,6 +48,7 @@ func NewAPIMetrics() *APIMetrics {
 	return apiMetrics
 }
 
+// MustRegisterAPI registers the API metrics and base service metrics
 func (m *APIMetrics) MustRegisterAPI() {
 	m.ServiceMetrics.MustRegister()
 
@@ -55,6 +58,7 @@ func (m *APIMetrics) MustRegisterAPI() {
 	)
 }
 
+// RecordJobCreation records the job creation metrics
 func (m *APIMetrics) RecordJobCreation(success bool, duration time.Duration) {
 	status := "success"
 	if !success {

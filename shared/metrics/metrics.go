@@ -12,6 +12,7 @@ import (
 	"github.com/yousuf64/shift"
 )
 
+// Labels for metrics
 const (
 	LabelService     = "service"
 	LabelMethod      = "method"
@@ -25,6 +26,7 @@ const (
 	LabelRequestType = "request_type"
 )
 
+// ServiceMetrics is a struct for service metrics
 type ServiceMetrics struct {
 	// HTTP
 	HTTPRequestsTotal    *prometheus.CounterVec
@@ -47,6 +49,7 @@ type ServiceMetrics struct {
 	uptimeTicker *time.Ticker
 }
 
+// NewServiceMetrics creates a new service metrics
 func NewServiceMetrics(serviceName string) *ServiceMetrics {
 	metrics := &ServiceMetrics{
 		HTTPRequestsTotal: prometheus.NewCounterVec(
@@ -145,6 +148,7 @@ func NewServiceMetrics(serviceName string) *ServiceMetrics {
 	return metrics
 }
 
+// MustRegister registers the service metrics
 func (m *ServiceMetrics) MustRegister() {
 	prometheus.MustRegister(
 		m.HTTPRequestsTotal,
@@ -160,6 +164,7 @@ func (m *ServiceMetrics) MustRegister() {
 	)
 }
 
+// HTTPMiddleware is a shift middleware to track metrics for HTTP requests
 func (m *ServiceMetrics) HTTPMiddleware(next shift.HandlerFunc) shift.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request, route shift.Route) error {
 		start := time.Now()
@@ -181,6 +186,7 @@ func (m *ServiceMetrics) HTTPMiddleware(next shift.HandlerFunc) shift.HandlerFun
 	}
 }
 
+// RecordNATSPublish records the metrics for NATS publish
 func (m *ServiceMetrics) RecordNATSPublish(messageType string, success bool) {
 	status := "success"
 	if !success {
@@ -189,6 +195,7 @@ func (m *ServiceMetrics) RecordNATSPublish(messageType string, success bool) {
 	m.NATSMessagesPublished.WithLabelValues(messageType, status).Inc()
 }
 
+// RecordNATSReceive records the metrics for NATS receive
 func (m *ServiceMetrics) RecordNATSReceive(messageType string, duration time.Duration, success bool) {
 	status := "success"
 	if !success {
@@ -198,6 +205,7 @@ func (m *ServiceMetrics) RecordNATSReceive(messageType string, duration time.Dur
 	m.NATSMessageDuration.WithLabelValues(messageType).Observe(duration.Seconds())
 }
 
+// RecordDatabaseOperation records the metrics for database operations
 func (m *ServiceMetrics) RecordDatabaseOperation(operation, table string, start time.Time, err error) {
 	status := "success"
 	if err != nil {
@@ -207,10 +215,12 @@ func (m *ServiceMetrics) RecordDatabaseOperation(operation, table string, start 
 	m.DatabaseOperationDuration.WithLabelValues(operation, table).Observe(time.Since(start).Seconds())
 }
 
+// SetServiceInfo sets the service info metrics
 func (m *ServiceMetrics) SetServiceInfo(version, goVersion string) {
 	m.ServiceInfo.WithLabelValues(version, goVersion).Set(1)
 }
 
+// startUptimeTracking starts the uptime tracking
 func (m *ServiceMetrics) startUptimeTracking() {
 	startTime := time.Now()
 
@@ -224,6 +234,7 @@ func (m *ServiceMetrics) startUptimeTracking() {
 	}()
 }
 
+// stopUptimeTracking stops the uptime tracking
 func (m *ServiceMetrics) stopUptimeTracking() {
 	if m.uptimeTicker != nil {
 		m.uptimeTicker.Stop()
@@ -231,6 +242,7 @@ func (m *ServiceMetrics) stopUptimeTracking() {
 	}
 }
 
+// StartMetricsServer starts the metrics server
 func (m *ServiceMetrics) StartMetricsServer(port string) *http.Server {
 	router := shift.New()
 	router.Use(middleware.CORSMiddleware)

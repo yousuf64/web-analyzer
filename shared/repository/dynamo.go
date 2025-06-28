@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 )
 
+// NewDynamoDBClient creates a new DynamoDB client
 func NewDynamoDBClient(cfg config.DynamoDBConfig) (*dynamodb.DynamoDB, error) {
 	sess, err := session.NewSession(&aws.Config{
 		Region:   aws.String(cfg.Region),
@@ -30,11 +31,12 @@ func NewDynamoDBClient(cfg config.DynamoDBConfig) (*dynamodb.DynamoDB, error) {
 	return client, nil
 }
 
+// SeedTables seeds the DynamoDB tables
 func SeedTables(client *dynamodb.DynamoDB, cfg config.DynamoDBConfig, mc MetricsCollector) error {
 	err := createJobsTableIfNotExists(client, JobsTableName, mc)
 	if err != nil {
 		return err
-	}	
+	}
 
 	err = createTasksTableIfNotExists(client, TasksTableName, mc)
 	if err != nil {
@@ -44,6 +46,7 @@ func SeedTables(client *dynamodb.DynamoDB, cfg config.DynamoDBConfig, mc Metrics
 	return nil
 }
 
+// createJobsTableIfNotExists creates the jobs table if it doesn't exist
 func createJobsTableIfNotExists(client *dynamodb.DynamoDB, tableName string, mc MetricsCollector) error {
 	// Check if table exists
 	_, err := client.DescribeTable(&dynamodb.DescribeTableInput{
@@ -90,6 +93,7 @@ func createJobsTableIfNotExists(client *dynamodb.DynamoDB, tableName string, mc 
 	return nil
 }
 
+// createTasksTableIfNotExists creates the tasks table if it doesn't exist
 func createTasksTableIfNotExists(client *dynamodb.DynamoDB, tableName string, mc MetricsCollector) error {
 	// Check if table exists
 	_, err := client.DescribeTable(&dynamodb.DescribeTableInput{
