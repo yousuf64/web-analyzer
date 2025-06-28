@@ -7,12 +7,8 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/exporters/stdout/stdoutlog"
-	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 	"go.opentelemetry.io/otel/exporters/zipkin"
 	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/sdk/log"
-	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.34.0"
@@ -80,24 +76,6 @@ func SetupOTelSDK(ctx context.Context, serviceName string) (shutdown func(contex
 	otel.SetTracerProvider(tracerProvider)
 	tracer = tracerProvider.Tracer(serviceName)
 
-	// Set up meter provider.
-	// meterProvider, err := newMeterProvider()
-	// if err != nil {
-	// 	handleErr(err)
-	// 	return
-	// }
-	// shutdownFuncs = append(shutdownFuncs, meterProvider.Shutdown)
-	// otel.SetMeterProvider(meterProvider)
-
-	// // Set up logger provider.
-	// loggerProvider, err := newLoggerProvider()
-	// if err != nil {
-	// 	handleErr(err)
-	// 	return
-	// }
-	// shutdownFuncs = append(shutdownFuncs, loggerProvider.Shutdown)
-	// global.SetLoggerProvider(loggerProvider)
-
 	return
 }
 
@@ -135,30 +113,4 @@ func newTracerProvider(serviceName string) (*sdktrace.TracerProvider, error) {
 		sdktrace.WithResource(res),
 	)
 	return tracerProvider, nil
-}
-
-func newMeterProvider() (*metric.MeterProvider, error) {
-	metricExporter, err := stdoutmetric.New()
-	if err != nil {
-		return nil, err
-	}
-
-	meterProvider := metric.NewMeterProvider(
-		metric.WithReader(metric.NewPeriodicReader(metricExporter,
-			// Default is 1m. Set to 3s for demonstrative purposes.
-			metric.WithInterval(3*time.Second))),
-	)
-	return meterProvider, nil
-}
-
-func newLoggerProvider() (*log.LoggerProvider, error) {
-	logExporter, err := stdoutlog.New()
-	if err != nil {
-		return nil, err
-	}
-
-	loggerProvider := log.NewLoggerProvider(
-		log.WithProcessor(log.NewBatchProcessor(logExporter)),
-	)
-	return loggerProvider, nil
 }

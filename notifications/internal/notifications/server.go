@@ -3,9 +3,14 @@ package notifications
 import (
 	"context"
 	"log/slog"
+	"net"
 	"net/http"
 	"shared/config"
+	"shared/middleware"
+	"shared/tracing"
 	"time"
+
+	"github.com/yousuf64/shift"
 )
 
 // Server handles the HTTP server and notification service
@@ -47,17 +52,21 @@ func WithServerLogger(log *slog.Logger) ServerOption {
 }
 
 // Start starts the server and notification service
-func (s *Server) Start() error {
+func (s *Server) Start(ctx context.Context) error {
 	// Start notification service
-	ctx := context.Background()
 	if err := s.notificationSvc.Start(ctx); err != nil {
 		return err
 	}
 
-	// Setup routes
-	mux := http.NewServeMux()
-	wsHandler := s.notificationSvc.GetWebSocketHandler()
-	mux.HandleFunc("/ws", s.corsMiddleware(wsHandler.HandleWebSocket))
+	// Setup router with middleware
+	router := shift.New()
+	router.Use(tracing.OtelMiddleware)
+	router.Use(middleware.CORSMiddleware)
+	router.Use(middleware.ErrorMiddleware(s.log))
+
+	// Register routes
+	router.OPTIONS("/*wildcard", middleware.OptionsHandler)
+	router.GET("/ws", s.handleWebSocket)
 
 	// Configure server
 	addr := ":8081"
@@ -67,7 +76,8 @@ func (s *Server) Start() error {
 
 	s.srv = &http.Server{
 		Addr:         addr,
-		Handler:      mux,
+		Handler:      router.Serve(),
+		BaseContext:  func(_ net.Listener) context.Context { return ctx },
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -92,19 +102,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// corsMiddleware adds CORS headers to responses
-func (s *Server) corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Max-Age", "86400")
-
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		next(w, r)
-	}
+// handleWebSocket handles WebSocket connections
+func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request, route shift.Route) error {
+	wsHandler := s.notificationSvc.GetWebSocketHandler()
+	wsHandler.HandleWebSocket(w, r)
+	return nil
 }

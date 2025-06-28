@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"shared/messagebus"
 	"shared/metrics"
+	"shared/middleware"
 	"shared/repository"
 	"shared/tracing"
 	"shared/types"
@@ -57,14 +58,14 @@ func NewAPI(
 func (a *API) Start(ctx context.Context, cfg *config.Config) error {
 	router := shift.New()
 	router.Use(tracing.OtelMiddleware)
-	router.Use(a.corsMiddleware)
+	router.Use(middleware.CORSMiddleware)
 	if a.metrics != nil {
 		router.Use(a.metrics.HTTPMiddleware)
 	}
-	router.Use(a.errorMiddleware)
+	router.Use(middleware.ErrorMiddleware(a.log))
 
 	// Register routes
-	router.OPTIONS("/*wildcard", a.handleOptions)
+	router.OPTIONS("/*wildcard", middleware.OptionsHandler)
 	router.POST("/analyze", a.handleAnalyze)
 	router.GET("/jobs", a.handleGetJobs)
 	router.GET("/jobs/:job_id/tasks", a.handleGetTasksByJobID)

@@ -62,7 +62,7 @@ func main() {
 	// Start server in goroutine
 	go func() {
 		logger.Info("Starting notification server", slog.String("addr", cfg.HTTP.Addr))
-		if err := srv.Start(); err != nil {
+		if err := srv.Start(ctx); err != nil {
 			logger.Error("Failed to start server", slog.Any("error", err))
 			os.Exit(1)
 		}

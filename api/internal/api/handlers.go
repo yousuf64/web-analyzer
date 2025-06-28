@@ -13,12 +13,6 @@ import (
 	"github.com/yousuf64/shift"
 )
 
-// handleOptions handles OPTIONS requests for CORS
-func (a *API) handleOptions(w http.ResponseWriter, r *http.Request, route shift.Route) error {
-	w.WriteHeader(http.StatusOK)
-	return nil
-}
-
 // handleAnalyze handles the analyze endpoint
 func (a *API) handleAnalyze(w http.ResponseWriter, r *http.Request, route shift.Route) error {
 	ctx := r.Context()
