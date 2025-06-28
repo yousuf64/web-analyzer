@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"shared/models"
 	"shared/tracing"
-	"shared/types"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -37,10 +37,10 @@ type AnalyzeMessage struct {
 }
 
 type JobUpdateMessage struct {
-	Type   MessageType          `json:"type"`
-	JobID  string               `json:"job_id"`
-	Status string               `json:"status"`
-	Result *types.AnalyzeResult `json:"result,omitempty"`
+	Type   MessageType           `json:"type"`
+	JobID  string                `json:"job_id"`
+	Status string                `json:"status"`
+	Result *models.AnalyzeResult `json:"result,omitempty"`
 }
 
 type TaskStatusUpdateMessage struct {
@@ -51,11 +51,11 @@ type TaskStatusUpdateMessage struct {
 }
 
 type SubTaskUpdateMessage struct {
-	Type     MessageType   `json:"type"`
-	JobID    string        `json:"job_id"`
-	TaskType string        `json:"task_type"`
-	Key      string        `json:"key"`
-	SubTask  types.SubTask `json:"subtask"`
+	Type     MessageType    `json:"type"`
+	JobID    string         `json:"job_id"`
+	TaskType string         `json:"task_type"`
+	Key      string         `json:"key"`
+	SubTask  models.SubTask `json:"subtask"`
 }
 
 type MessageBus struct {

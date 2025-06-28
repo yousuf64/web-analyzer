@@ -3,8 +3,8 @@ package repository
 import (
 	"context"
 	"errors"
+	"shared/models"
 	"shared/tracing"
-	"shared/types"
 	"strings"
 	"time"
 
@@ -20,7 +20,6 @@ type JobRepository struct {
 	mc  MetricsCollector
 }
 
-// NewJobRepository creates a new JobRepository with the given metrics collector
 func NewJobRepository(mc MetricsCollector) (*JobRepository, error) {
 	ddb, err := NewDynamoDBClient()
 	if err != nil {
@@ -37,7 +36,8 @@ func NewJobRepository(mc MetricsCollector) (*JobRepository, error) {
 	}, nil
 }
 
-func (j *JobRepository) CreateJob(ctx context.Context, job *types.Job) (err error) {
+// CreateJob creates a new job
+func (j *JobRepository) CreateJob(ctx context.Context, job *models.Job) (err error) {
 	start := time.Now()
 	_, span := tracing.CreateDatabaseSpan(ctx, "create_job", JobsTableName)
 
@@ -46,8 +46,11 @@ func (j *JobRepository) CreateJob(ctx context.Context, job *types.Job) (err erro
 		span.Close(err)
 	}()
 
-	job.PartitionKey = "1000"
-	item, err := dynamodbattribute.MarshalMap(job)
+	// Convert domain model to entity
+	entity := &JobEntity{}
+	entity.FromModel(job)
+
+	item, err := dynamodbattribute.MarshalMap(entity)
 	if err != nil {
 		return err
 	}
@@ -61,7 +64,8 @@ func (j *JobRepository) CreateJob(ctx context.Context, job *types.Job) (err erro
 	return err
 }
 
-func (j *JobRepository) GetJob(ctx context.Context, id string) (job *types.Job, err error) {
+// GetJob queries a job by ID
+func (j *JobRepository) GetJob(ctx context.Context, id string) (job *models.Job, err error) {
 	start := time.Now()
 	_, span := tracing.CreateDatabaseSpan(ctx, "get_job", JobsTableName)
 
@@ -92,15 +96,17 @@ func (j *JobRepository) GetJob(ctx context.Context, id string) (job *types.Job, 
 		return nil, notFoundErr
 	}
 
-	err = dynamodbattribute.UnmarshalMap(result.Item, &job)
+	var entity JobEntity
+	err = dynamodbattribute.UnmarshalMap(result.Item, &entity)
 	if err != nil {
 		return nil, err
 	}
 
-	return job, nil
+	return entity.ToModel(), nil
 }
 
-func (j *JobRepository) GetAllJobs(ctx context.Context) (jobs []*types.Job, err error) {
+// GetAllJobs queries all jobs
+func (j *JobRepository) GetAllJobs(ctx context.Context) (jobs []*models.Job, err error) {
 	start := time.Now()
 	_, span := tracing.CreateDatabaseSpan(ctx, "query_all_jobs", JobsTableName)
 
@@ -128,20 +134,21 @@ func (j *JobRepository) GetAllJobs(ctx context.Context) (jobs []*types.Job, err 
 		return nil, err
 	}
 
-	jobs = make([]*types.Job, 0, len(result.Items))
+	jobs = make([]*models.Job, 0, len(result.Items))
 	for _, item := range result.Items {
-		var job types.Job
-		err = dynamodbattribute.UnmarshalMap(item, &job)
+		var entity JobEntity
+		err = dynamodbattribute.UnmarshalMap(item, &entity)
 		if err != nil {
 			return nil, err
 		}
-		jobs = append(jobs, &job)
+		jobs = append(jobs, entity.ToModel())
 	}
 
 	return jobs, nil
 }
 
-func (j *JobRepository) UpdateJobStatus(ctx context.Context, id string, status types.JobStatus) (err error) {
+// UpdateJobStatus updates the status of a job
+func (j *JobRepository) UpdateJobStatus(ctx context.Context, id string, status models.JobStatus) (err error) {
 	start := time.Now()
 	_, span := tracing.CreateDatabaseSpan(ctx, "update_job_status", JobsTableName)
 
@@ -178,7 +185,8 @@ func (j *JobRepository) UpdateJobStatus(ctx context.Context, id string, status t
 	return err
 }
 
-func (j *JobRepository) UpdateJob(ctx context.Context, id string, status *types.JobStatus, result *types.AnalyzeResult) (err error) {
+// UpdateJob updates a job
+func (j *JobRepository) UpdateJob(ctx context.Context, id string, status *models.JobStatus, result *models.AnalyzeResult) (err error) {
 	start := time.Now()
 	_, span := tracing.CreateDatabaseSpan(ctx, "update_job", JobsTableName)
 
@@ -207,7 +215,12 @@ func (j *JobRepository) UpdateJob(ctx context.Context, id string, status *types.
 	if result != nil {
 		updateExpressions = append(updateExpressions, "#result = :result")
 		expressionAttributeNames["#result"] = aws.String("result")
-		resultAttr, err := dynamodbattribute.Marshal(result)
+
+		// Convert models.AnalyzeResult to AnalyzeResultEntity
+		resultEntity := &AnalyzeResultEntity{}
+		resultEntity.FromModel(result)
+
+		resultAttr, err := dynamodbattribute.Marshal(resultEntity)
 		if err != nil {
 			return err
 		}
@@ -241,9 +254,6 @@ func (j *JobRepository) UpdateJob(ctx context.Context, id string, status *types.
 
 	if len(expressionAttributeNames) > 0 {
 		input.ExpressionAttributeNames = expressionAttributeNames
-	}
-	if len(expressionAttributeValues) > 0 {
-		input.ExpressionAttributeValues = expressionAttributeValues
 	}
 
 	_, err = j.ddb.UpdateItem(input)

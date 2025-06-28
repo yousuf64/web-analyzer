@@ -3,7 +3,7 @@ package analyzer
 import (
 	"context"
 	"fmt"
-	"shared/types"
+	"shared/models"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -28,33 +28,33 @@ func (s *Analyzer) analyzeHTML(ctx context.Context, jobID, content string, resul
 // parseHTML parses HTML content and tracks the parsing task
 func (s *Analyzer) parseHTML(ctx context.Context, jobID, content string) (*html.Node, error) {
 	start := time.Now()
-	s.updateTaskStatus(ctx, jobID, types.TaskTypeExtracting, types.TaskStatusPending)
+	s.updateTaskStatus(ctx, jobID, models.TaskTypeExtracting, models.TaskStatusPending)
 
 	doc, err := html.Parse(strings.NewReader(content))
 
 	success := err == nil
 	if s.metrics != nil {
-		s.metrics.RecordAnalysisTask(string(types.TaskTypeExtracting), success, time.Since(start).Seconds())
+		s.metrics.RecordAnalysisTask(string(models.TaskTypeExtracting), success, time.Since(start).Seconds())
 	}
 
 	if err != nil {
-		s.updateTaskStatus(ctx, jobID, types.TaskTypeExtracting, types.TaskStatusFailed)
+		s.updateTaskStatus(ctx, jobID, models.TaskTypeExtracting, models.TaskStatusFailed)
 		return nil, fmt.Errorf("HTML parsing failed: %w", err)
 	}
 
-	s.updateTaskStatus(ctx, jobID, types.TaskTypeExtracting, types.TaskStatusCompleted)
+	s.updateTaskStatus(ctx, jobID, models.TaskTypeExtracting, models.TaskStatusCompleted)
 	return doc, nil
 }
 
 // detectHTMLVersion identifies the HTML version from the document
 func (s *Analyzer) detectHTMLVersion(ctx context.Context, jobID, content string, result *AnalysisResult) {
 	start := time.Now()
-	s.updateTaskStatus(ctx, jobID, types.TaskTypeIdentifyingVersion, types.TaskStatusRunning)
+	s.updateTaskStatus(ctx, jobID, models.TaskTypeIdentifyingVersion, models.TaskStatusRunning)
 
 	defer func() {
-		s.updateTaskStatus(ctx, jobID, types.TaskTypeIdentifyingVersion, types.TaskStatusCompleted)
+		s.updateTaskStatus(ctx, jobID, models.TaskTypeIdentifyingVersion, models.TaskStatusCompleted)
 		if s.metrics != nil {
-			s.metrics.RecordAnalysisTask(string(types.TaskTypeIdentifyingVersion), true, time.Since(start).Seconds())
+			s.metrics.RecordAnalysisTask(string(models.TaskTypeIdentifyingVersion), true, time.Since(start).Seconds())
 		}
 	}()
 
@@ -101,12 +101,12 @@ func (s *Analyzer) parseHTMLVersion(content string) string {
 // analyzeContent performs content analysis using DFS traversal
 func (s *Analyzer) analyzeContent(ctx context.Context, jobID string, doc *html.Node, result *AnalysisResult) {
 	start := time.Now()
-	s.updateTaskStatus(ctx, jobID, types.TaskTypeAnalyzing, types.TaskStatusRunning)
+	s.updateTaskStatus(ctx, jobID, models.TaskTypeAnalyzing, models.TaskStatusRunning)
 
 	defer func() {
-		s.updateTaskStatus(ctx, jobID, types.TaskTypeAnalyzing, types.TaskStatusCompleted)
+		s.updateTaskStatus(ctx, jobID, models.TaskTypeAnalyzing, models.TaskStatusCompleted)
 		if s.metrics != nil {
-			s.metrics.RecordAnalysisTask(string(types.TaskTypeAnalyzing), true, time.Since(start).Seconds())
+			s.metrics.RecordAnalysisTask(string(models.TaskTypeAnalyzing), true, time.Since(start).Seconds())
 		}
 	}()
 
@@ -178,9 +178,9 @@ func (s *Analyzer) checkLoginForm(n *html.Node, result *AnalysisResult) {
 	}
 }
 
-// buildResult converts internal result to public result type
-func (s *Analyzer) buildResult(result *AnalysisResult) types.AnalyzeResult {
-	return types.AnalyzeResult{
+// buildResult builds and returns the analysis result
+func (s *Analyzer) buildResult(result *AnalysisResult) models.AnalyzeResult {
+	return models.AnalyzeResult{
 		HtmlVersion:       result.htmlVersion,
 		PageTitle:         result.title,
 		Headings:          result.headings,

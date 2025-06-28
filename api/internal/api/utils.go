@@ -2,7 +2,7 @@ package api
 
 import (
 	"crypto/rand"
-	"shared/types"
+	"shared/models"
 	"sync"
 	"time"
 
@@ -25,11 +25,11 @@ func generateID() string {
 }
 
 // getDefaultTasks returns the default tasks for a job
-func getDefaultTasks(jobID string) []*types.Task {
-	return []*types.Task{
-		{JobID: jobID, Type: types.TaskTypeExtracting, Status: types.TaskStatusPending},
-		{JobID: jobID, Type: types.TaskTypeIdentifyingVersion, Status: types.TaskStatusPending},
-		{JobID: jobID, Type: types.TaskTypeAnalyzing, Status: types.TaskStatusPending},
-		{JobID: jobID, Type: types.TaskTypeVerifyingLinks, Status: types.TaskStatusPending},
+func getDefaultTasks(jobID string) []*models.Task {
+	return []*models.Task{
+		{JobID: jobID, Type: models.TaskTypeExtracting, Status: models.TaskStatusPending, SubTasks: make(map[string]models.SubTask)},
+		{JobID: jobID, Type: models.TaskTypeIdentifyingVersion, Status: models.TaskStatusPending, SubTasks: make(map[string]models.SubTask)},
+		{JobID: jobID, Type: models.TaskTypeAnalyzing, Status: models.TaskStatusPending, SubTasks: make(map[string]models.SubTask)},
+		{JobID: jobID, Type: models.TaskTypeVerifyingLinks, Status: models.TaskStatusPending, SubTasks: make(map[string]models.SubTask)},
 	}
 }

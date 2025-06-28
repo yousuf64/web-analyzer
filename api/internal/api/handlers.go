@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"shared/messagebus"
-	"shared/types"
+	"shared/models"
 	"time"
 
 	"github.com/yousuf64/shift"
@@ -41,10 +41,10 @@ func (a *API) handleAnalyze(w http.ResponseWriter, r *http.Request, route shift.
 		slog.String("jobId", jobID),
 		slog.String("url", validatedURL))
 
-	job := &types.Job{
+	job := &models.Job{
 		ID:        jobID,
 		URL:       validatedURL,
-		Status:    types.JobStatusPending,
+		Status:    models.JobStatusPending,
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
 	}
@@ -103,12 +103,6 @@ func (a *API) handleGetTasksByJobID(w http.ResponseWriter, r *http.Request, rout
 		return errors.Join(err, errors.New("failed to get tasks"))
 	}
 
-	// Convert []types.Task to []*types.Task for consistency
-	result := make([]*types.Task, len(tasks))
-	for i := range tasks {
-		result[i] = &tasks[i]
-	}
-
 	w.Header().Set("Content-Type", "application/json")
-	return json.NewEncoder(w).Encode(result)
+	return json.NewEncoder(w).Encode(tasks)
 }

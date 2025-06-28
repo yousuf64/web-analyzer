@@ -9,9 +9,9 @@ import (
 	"shared/messagebus"
 	"shared/metrics"
 	"shared/middleware"
+	"shared/models"
 	"shared/repository"
 	"shared/tracing"
-	"shared/types"
 	"time"
 
 	"github.com/yousuf64/shift"
@@ -34,7 +34,7 @@ type AnalyzeRequest struct {
 
 // AnalyzeResponse is the response body for the analyze endpoint
 type AnalyzeResponse struct {
-	Job types.Job `json:"job"`
+	Job models.Job `json:"job"`
 }
 
 // NewAPI creates a new API with all dependencies

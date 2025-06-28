@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"shared/messagebus"
-	"shared/types"
+	"shared/models"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -58,7 +58,7 @@ func (s *Analyzer) analyzeURL(ctx context.Context, am messagebus.AnalyzeMessage)
 		slog.String("jobId", am.JobId),
 		slog.String("url", job.URL))
 
-	if err := s.updateJobStatus(ctx, am.JobId, types.JobStatusRunning); err != nil {
+	if err := s.updateJobStatus(ctx, am.JobId, models.JobStatusRunning); err != nil {
 		s.failAllTasks(ctx, am.JobId)
 		return fmt.Errorf("failed to update job status: %w", err)
 	}
@@ -79,7 +79,7 @@ func (s *Analyzer) analyzeURL(ctx context.Context, am messagebus.AnalyzeMessage)
 }
 
 // performAnalysis creates and runs the HTML analyzer
-func (s *Analyzer) performAnalysis(ctx context.Context, jobID, url, content string) (types.AnalyzeResult, error) {
+func (s *Analyzer) performAnalysis(ctx context.Context, jobID, url, content string) (models.AnalyzeResult, error) {
 	result := &AnalysisResult{
 		headings: make(map[string]int),
 		links:    []string{},
@@ -87,14 +87,14 @@ func (s *Analyzer) performAnalysis(ctx context.Context, jobID, url, content stri
 	}
 
 	if err := s.analyzeHTML(ctx, jobID, content, result); err != nil {
-		return types.AnalyzeResult{}, err
+		return models.AnalyzeResult{}, err
 	}
 
 	return s.buildResult(result), nil
 }
 
 // updateJobStatus updates job status and publishes update
-func (s *Analyzer) updateJobStatus(ctx context.Context, jobID string, status types.JobStatus) error {
+func (s *Analyzer) updateJobStatus(ctx context.Context, jobID string, status models.JobStatus) error {
 	if err := s.jobRepo.UpdateJobStatus(ctx, jobID, status); err != nil {
 		return err
 	}
@@ -108,7 +108,7 @@ func (s *Analyzer) updateJobStatus(ctx context.Context, jobID string, status typ
 }
 
 // completeJob finalizes the job with results
-func (s *Analyzer) completeJob(ctx context.Context, job types.Job, result types.AnalyzeResult) error {
+func (s *Analyzer) completeJob(ctx context.Context, job models.Job, result models.AnalyzeResult) error {
 	s.log.Info("HTML analysis completed",
 		slog.String("jobId", job.ID),
 		slog.String("htmlVersion", result.HtmlVersion),
@@ -119,7 +119,7 @@ func (s *Analyzer) completeJob(ctx context.Context, job types.Job, result types.
 		slog.Int("inaccessibleLinks", result.InaccessibleLinks),
 		slog.Bool("hasLoginForm", result.HasLoginForm))
 
-	completedStatus := types.JobStatusCompleted
+	completedStatus := models.JobStatusCompleted
 	if err := s.jobRepo.UpdateJob(ctx, job.ID, &completedStatus, &result); err != nil {
 		return fmt.Errorf("failed to update job: %w", err)
 	}
@@ -127,22 +127,22 @@ func (s *Analyzer) completeJob(ctx context.Context, job types.Job, result types.
 	return s.publisher.PublishJobUpdate(ctx, messagebus.JobUpdateMessage{
 		Type:   messagebus.JobUpdateMessageType,
 		JobID:  job.ID,
-		Status: string(types.JobStatusCompleted),
+		Status: string(models.JobStatusCompleted),
 		Result: &result,
 	})
 }
 
 // failAllTasks marks all tasks as failed
 func (s *Analyzer) failAllTasks(ctx context.Context, jobID string) {
-	s.updateJobStatus(ctx, jobID, types.JobStatusFailed)
-	s.taskRepo.UpdateTaskStatus(ctx, jobID, types.TaskTypeExtracting, types.TaskStatusFailed)
-	s.taskRepo.UpdateTaskStatus(ctx, jobID, types.TaskTypeIdentifyingVersion, types.TaskStatusFailed)
-	s.taskRepo.UpdateTaskStatus(ctx, jobID, types.TaskTypeAnalyzing, types.TaskStatusFailed)
-	s.taskRepo.UpdateTaskStatus(ctx, jobID, types.TaskTypeVerifyingLinks, types.TaskStatusFailed)
+	s.updateJobStatus(ctx, jobID, models.JobStatusFailed)
+	s.taskRepo.UpdateTaskStatus(ctx, jobID, models.TaskTypeExtracting, models.TaskStatusFailed)
+	s.taskRepo.UpdateTaskStatus(ctx, jobID, models.TaskTypeIdentifyingVersion, models.TaskStatusFailed)
+	s.taskRepo.UpdateTaskStatus(ctx, jobID, models.TaskTypeAnalyzing, models.TaskStatusFailed)
+	s.taskRepo.UpdateTaskStatus(ctx, jobID, models.TaskTypeVerifyingLinks, models.TaskStatusFailed)
 }
 
 // updateTaskStatus updates task status and publishes update
-func (s *Analyzer) updateTaskStatus(ctx context.Context, jobID string, taskType types.TaskType, status types.TaskStatus) {
+func (s *Analyzer) updateTaskStatus(ctx context.Context, jobID string, taskType models.TaskType, status models.TaskStatus) {
 	if err := s.taskRepo.UpdateTaskStatus(ctx, jobID, taskType, status); err != nil {
 		s.log.Error("Failed to update task status",
 			slog.String("jobId", jobID),

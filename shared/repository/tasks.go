@@ -2,10 +2,8 @@ package repository
 
 import (
 	"context"
-	"errors"
+	"shared/models"
 	"shared/tracing"
-	"shared/types"
-	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -37,7 +35,8 @@ func NewTaskRepository(mc MetricsCollector) (*TaskRepository, error) {
 	}, nil
 }
 
-func (t *TaskRepository) CreateTasks(ctx context.Context, tasks ...*types.Task) (err error) {
+// CreateTasks creates tasks
+func (t *TaskRepository) CreateTasks(ctx context.Context, tasks ...*models.Task) (err error) {
 	start := time.Now()
 	_, span := tracing.CreateDatabaseSpan(ctx, "create_tasks", TasksTableName)
 
@@ -46,30 +45,23 @@ func (t *TaskRepository) CreateTasks(ctx context.Context, tasks ...*types.Task) 
 		span.Close(err)
 	}()
 
-	if len(tasks) == 0 {
-		return nil
-	}
+	writeRequests := make([]*dynamodb.WriteRequest, 0, len(tasks))
 
-	var writeRequests []*dynamodb.WriteRequest
 	for _, task := range tasks {
-		item, err := dynamodbattribute.MarshalMap(task)
+		// Convert domain model to entity
+		entity := &TaskEntity{}
+		entity.FromModel(task)
+
+		item, err := dynamodbattribute.MarshalMap(entity)
 		if err != nil {
 			return err
 		}
 
-		if len(task.SubTasks) == 0 {
-			// Initialize subtasks as empty map
-			item["subtasks"] = &dynamodb.AttributeValue{
-				M: map[string]*dynamodb.AttributeValue{},
-			}
-		}
-
-		writeRequest := &dynamodb.WriteRequest{
+		writeRequests = append(writeRequests, &dynamodb.WriteRequest{
 			PutRequest: &dynamodb.PutRequest{
 				Item: item,
 			},
-		}
-		writeRequests = append(writeRequests, writeRequest)
+		})
 	}
 
 	input := &dynamodb.BatchWriteItemInput{
@@ -79,14 +71,11 @@ func (t *TaskRepository) CreateTasks(ctx context.Context, tasks ...*types.Task) 
 	}
 
 	_, err = t.ddb.BatchWriteItem(input)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return err
 }
 
-func (t *TaskRepository) UpdateTaskStatus(ctx context.Context, jobId string, taskType types.TaskType, status types.TaskStatus) (err error) {
+// UpdateTaskStatus updates task status
+func (t *TaskRepository) UpdateTaskStatus(ctx context.Context, jobId string, taskType models.TaskType, status models.TaskStatus) (err error) {
 	start := time.Now()
 	_, span := tracing.CreateDatabaseSpan(ctx, "update_task_status", TasksTableName)
 
@@ -120,95 +109,8 @@ func (t *TaskRepository) UpdateTaskStatus(ctx context.Context, jobId string, tas
 	return err
 }
 
-func (t *TaskRepository) AddSubTaskByKey(ctx context.Context, jobId string, taskType types.TaskType, key string, subtask types.SubTask) (err error) {
-	start := time.Now()
-	_, span := tracing.CreateDatabaseSpan(ctx, "add_subtask", TasksTableName)
-
-	defer func() {
-		t.mc.RecordDatabaseOperation("add_subtask", TasksTableName, start, err)
-		span.Close(err)
-	}()
-
-	subtaskItem, err := dynamodbattribute.MarshalMap(subtask)
-	if err != nil {
-		return err
-	}
-
-	input := &dynamodb.UpdateItemInput{
-		TableName: aws.String(TasksTableName),
-		Key: map[string]*dynamodb.AttributeValue{
-			"job_id": {
-				S: aws.String(jobId),
-			},
-			"type": {
-				S: aws.String(string(taskType)),
-			},
-		},
-		UpdateExpression: aws.String("SET #subtasks.#key = :subtask"),
-		ExpressionAttributeNames: map[string]*string{
-			"#subtasks": aws.String("subtasks"),
-			"#key":      aws.String(key),
-		},
-		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-			":subtask": {
-				M: subtaskItem,
-			},
-		},
-	}
-
-	_, err = t.ddb.UpdateItem(input)
-	return err
-}
-
-func (t *TaskRepository) UpdateSubTaskByKey(ctx context.Context, jobId string, taskType types.TaskType, key string, subtask types.SubTask) (err error) {
-	start := time.Now()
-	_, span := tracing.CreateDatabaseSpan(ctx, "update_subtask", TasksTableName)
-
-	defer func() {
-		t.mc.RecordDatabaseOperation("update_subtask", TasksTableName, start, err)
-		span.Close(err)
-	}()
-
-	subtaskItem, err := dynamodbattribute.MarshalMap(subtask)
-	if err != nil {
-		return err
-	}
-
-	input := &dynamodb.UpdateItemInput{
-		TableName: aws.String(TasksTableName),
-		Key: map[string]*dynamodb.AttributeValue{
-			"job_id": {
-				S: aws.String(jobId),
-			},
-			"type": {
-				S: aws.String(string(taskType)),
-			},
-		},
-		UpdateExpression: aws.String("SET subtasks.#key = :subtask"),
-		ExpressionAttributeNames: map[string]*string{
-			"#key": aws.String(key),
-		},
-		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-			":subtask": {
-				M: subtaskItem,
-			},
-		},
-		ConditionExpression: aws.String("attribute_exists(subtasks.#key)"),
-	}
-
-	_, err = t.ddb.UpdateItem(input)
-	if err != nil {
-		if strings.Contains(err.Error(), "ConditionalCheckFailedException") {
-			conditionalErr := errors.New("subtask not found for the given key")
-			return conditionalErr
-		}
-		return err
-	}
-
-	return nil
-}
-
-func (t *TaskRepository) GetTasksByJobId(ctx context.Context, jobId string) (tasks []types.Task, err error) {
+// GetTasksByJobId queries tasks by job ID
+func (t *TaskRepository) GetTasksByJobId(ctx context.Context, jobId string) (tasks []models.Task, err error) {
 	start := time.Now()
 	_, span := tracing.CreateDatabaseSpan(ctx, "query_tasks_by_job_id", TasksTableName)
 
@@ -232,14 +134,99 @@ func (t *TaskRepository) GetTasksByJobId(ctx context.Context, jobId string) (tas
 		return nil, err
 	}
 
+	tasks = make([]models.Task, 0, len(result.Items))
 	for _, item := range result.Items {
-		var task types.Task
-		err = dynamodbattribute.UnmarshalMap(item, &task)
+		var entity TaskEntity
+		err = dynamodbattribute.UnmarshalMap(item, &entity)
 		if err != nil {
 			return nil, err
 		}
-		tasks = append(tasks, task)
+		tasks = append(tasks, *entity.ToModel())
 	}
 
 	return tasks, nil
+}
+
+// AddSubTaskByKey adds a subtask by key
+func (t *TaskRepository) AddSubTaskByKey(ctx context.Context, jobId string, taskType models.TaskType, key string, subtask models.SubTask) (err error) {
+	start := time.Now()
+	_, span := tracing.CreateDatabaseSpan(ctx, "add_subtask", TasksTableName)
+
+	defer func() {
+		t.mc.RecordDatabaseOperation("add_subtask", TasksTableName, start, err)
+		span.Close(err)
+	}()
+
+	// Convert domain model to entity
+	entity := &SubTaskEntity{}
+	entity.FromModel(&subtask)
+
+	subtaskAttr, err := dynamodbattribute.Marshal(entity)
+	if err != nil {
+		return err
+	}
+
+	input := &dynamodb.UpdateItemInput{
+		TableName: aws.String(TasksTableName),
+		Key: map[string]*dynamodb.AttributeValue{
+			"job_id": {
+				S: aws.String(jobId),
+			},
+			"type": {
+				S: aws.String(string(taskType)),
+			},
+		},
+		UpdateExpression: aws.String("SET subtasks.#key = :subtask"),
+		ExpressionAttributeNames: map[string]*string{
+			"#key": aws.String(key),
+		},
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":subtask": subtaskAttr,
+		},
+	}
+
+	_, err = t.ddb.UpdateItem(input)
+	return err
+}
+
+// UpdateSubTaskByKey updates a subtask by key
+func (t *TaskRepository) UpdateSubTaskByKey(ctx context.Context, jobId string, taskType models.TaskType, key string, subtask models.SubTask) (err error) {
+	start := time.Now()
+	_, span := tracing.CreateDatabaseSpan(ctx, "update_subtask", TasksTableName)
+
+	defer func() {
+		t.mc.RecordDatabaseOperation("update_subtask", TasksTableName, start, err)
+		span.Close(err)
+	}()
+
+	// Convert domain model to entity
+	entity := &SubTaskEntity{}
+	entity.FromModel(&subtask)
+
+	subtaskAttr, err := dynamodbattribute.Marshal(entity)
+	if err != nil {
+		return err
+	}
+
+	input := &dynamodb.UpdateItemInput{
+		TableName: aws.String(TasksTableName),
+		Key: map[string]*dynamodb.AttributeValue{
+			"job_id": {
+				S: aws.String(jobId),
+			},
+			"type": {
+				S: aws.String(string(taskType)),
+			},
+		},
+		UpdateExpression: aws.String("SET subtasks.#key = :subtask"),
+		ExpressionAttributeNames: map[string]*string{
+			"#key": aws.String(key),
+		},
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":subtask": subtaskAttr,
+		},
+	}
+
+	_, err = t.ddb.UpdateItem(input)
+	return err
 }

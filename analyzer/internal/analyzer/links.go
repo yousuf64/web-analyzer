@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"shared/messagebus"
-	"shared/types"
+	"shared/models"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -16,12 +16,12 @@ import (
 // verifyLinks verifies all collected links concurrently
 func (s *Analyzer) verifyLinks(ctx context.Context, jobID string, result *AnalysisResult) {
 	start := time.Now()
-	s.updateTaskStatus(ctx, jobID, types.TaskTypeVerifyingLinks, types.TaskStatusRunning)
+	s.updateTaskStatus(ctx, jobID, models.TaskTypeVerifyingLinks, models.TaskStatusRunning)
 
 	defer func() {
-		s.updateTaskStatus(ctx, jobID, types.TaskTypeVerifyingLinks, types.TaskStatusCompleted)
+		s.updateTaskStatus(ctx, jobID, models.TaskTypeVerifyingLinks, models.TaskStatusCompleted)
 		if s.metrics != nil {
-			s.metrics.RecordAnalysisTask(string(types.TaskTypeVerifyingLinks), true, time.Since(start).Seconds())
+			s.metrics.RecordAnalysisTask(string(models.TaskTypeVerifyingLinks), true, time.Since(start).Seconds())
 		}
 	}()
 
@@ -48,7 +48,7 @@ func (s *Analyzer) verifyLinks(ctx context.Context, jobID string, result *Analys
 
 	for i, link := range result.links {
 		key := strconv.Itoa(i + 1)
-		s.publishSubTaskAdd(ctx, jobID, types.TaskTypeVerifyingLinks, key, link)
+		s.publishSubTaskAdd(ctx, jobID, models.TaskTypeVerifyingLinks, key, link)
 
 		s.log.Debug("Added subtask for link verification", "key", key, "url", link)
 
@@ -61,9 +61,9 @@ func (s *Analyzer) verifyLinks(ctx context.Context, jobID string, result *Analys
 				<-sem
 			}()
 
-			s.publishSubTaskUpdate(ctx, jobID, types.TaskTypeVerifyingLinks, key, types.SubTask{
-				Type:   types.SubTaskTypeValidatingLink,
-				Status: types.TaskStatusRunning,
+			s.publishSubTaskUpdate(ctx, jobID, models.TaskTypeVerifyingLinks, key, models.SubTask{
+				Type:   models.SubTaskTypeValidatingLink,
+				Status: models.TaskStatusRunning,
 				URL:    link,
 			})
 
@@ -71,21 +71,21 @@ func (s *Analyzer) verifyLinks(ctx context.Context, jobID string, result *Analys
 			status, desc := s.verifyLink(ctx, link)
 			d := time.Since(start).Seconds()
 
-			s.publishSubTaskUpdate(ctx, jobID, types.TaskTypeVerifyingLinks, key, types.SubTask{
-				Type:        types.SubTaskTypeValidatingLink,
+			s.publishSubTaskUpdate(ctx, jobID, models.TaskTypeVerifyingLinks, key, models.SubTask{
+				Type:        models.SubTaskTypeValidatingLink,
 				Status:      status,
 				URL:         link,
 				Description: desc,
 			})
 
-			if status == types.TaskStatusCompleted {
+			if status == models.TaskStatusCompleted {
 				atomic.AddInt32(&result.accessibleLinks, 1)
 			} else {
 				atomic.AddInt32(&result.inaccessibleLinks, 1)
 			}
 
 			if s.metrics != nil {
-				s.metrics.RecordLinkVerification(status == types.TaskStatusCompleted, d)
+				s.metrics.RecordLinkVerification(status == models.TaskStatusCompleted, d)
 			}
 
 		}(ctx, link, key)
@@ -96,18 +96,18 @@ func (s *Analyzer) verifyLinks(ctx context.Context, jobID string, result *Analys
 }
 
 // verifyLink verifies a single link
-func (s *Analyzer) verifyLink(ctx context.Context, link string) (types.TaskStatus, string) {
+func (s *Analyzer) verifyLink(ctx context.Context, link string) (models.TaskStatus, string) {
 	u, err := url.Parse(link)
 	if err != nil {
 		msg := fmt.Sprintf("Invalid URL: %s", err.Error())
 		s.log.Error("Error parsing URL", "url", link, "error", err)
-		return types.TaskStatusFailed, msg
+		return models.TaskStatusFailed, msg
 	}
 
 	if u.Scheme != "http" && u.Scheme != "https" {
 		desc := fmt.Sprintf("Unsupported protocol: %s", u.Scheme)
 		s.log.Debug("Skipping non-HTTP URL", "url", link, "scheme", u.Scheme)
-		return types.TaskStatusSkipped, desc
+		return models.TaskStatusSkipped, desc
 	}
 
 	// Start with HEAD request
@@ -123,12 +123,12 @@ func (s *Analyzer) verifyLink(ctx context.Context, link string) (types.TaskStatu
 }
 
 // tryHEADRequest attempts to verify a link using HEAD request
-func (s *Analyzer) tryHEADRequest(ctx context.Context, link string) (types.TaskStatus, string, bool) {
+func (s *Analyzer) tryHEADRequest(ctx context.Context, link string) (models.TaskStatus, string, bool) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, link, nil)
 	if err != nil {
 		msg := fmt.Sprintf("HEAD request creation failed: %s", err.Error())
 		s.log.Error("Failed to create HEAD request", "url", link, "error", err)
-		return types.TaskStatusFailed, msg, false
+		return models.TaskStatusFailed, msg, false
 	}
 
 	start := time.Now()
@@ -139,7 +139,7 @@ func (s *Analyzer) tryHEADRequest(ctx context.Context, link string) (types.TaskS
 		if s.metrics != nil {
 			s.metrics.RecordHTTPClientRequest(0, time.Since(start).Seconds(), http.MethodHead, "link_verification")
 		}
-		return types.TaskStatusFailed, msg, false
+		return models.TaskStatusFailed, msg, false
 	}
 	defer resp.Body.Close()
 
@@ -151,7 +151,7 @@ func (s *Analyzer) tryHEADRequest(ctx context.Context, link string) (types.TaskS
 	retry := s.shouldRetryWithGET(resp.StatusCode)
 
 	if retry {
-		return types.TaskStatusPending, "HEAD not supported, retrying with GET", true
+		return models.TaskStatusPending, "HEAD not supported, retrying with GET", true
 	}
 
 	// Process successful HEAD response
@@ -159,20 +159,20 @@ func (s *Analyzer) tryHEADRequest(ctx context.Context, link string) (types.TaskS
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
 		s.log.Debug("Link verified with HEAD", "url", link, "statusCode", resp.StatusCode)
-		return types.TaskStatusCompleted, desc, false
+		return models.TaskStatusCompleted, desc, false
 	}
 
 	s.log.Debug("Link verification failed with HEAD", "url", link, "statusCode", resp.StatusCode)
-	return types.TaskStatusFailed, desc, false
+	return models.TaskStatusFailed, desc, false
 }
 
 // tryGETRequest attempts to verify a link using GET request (fallback)
-func (s *Analyzer) tryGETRequest(ctx context.Context, link string) (types.TaskStatus, string) {
+func (s *Analyzer) tryGETRequest(ctx context.Context, link string) (models.TaskStatus, string) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, link, nil)
 	if err != nil {
 		msg := fmt.Sprintf("GET request creation failed: %s", err.Error())
 		s.log.Error("Failed to create GET request", "url", link, "error", err)
-		return types.TaskStatusFailed, msg
+		return models.TaskStatusFailed, msg
 	}
 
 	start := time.Now()
@@ -183,7 +183,7 @@ func (s *Analyzer) tryGETRequest(ctx context.Context, link string) (types.TaskSt
 		if s.metrics != nil {
 			s.metrics.RecordHTTPClientRequest(0, time.Since(start).Seconds(), http.MethodGet, "link_verification")
 		}
-		return types.TaskStatusFailed, msg
+		return models.TaskStatusFailed, msg
 	}
 	defer resp.Body.Close()
 
@@ -195,11 +195,11 @@ func (s *Analyzer) tryGETRequest(ctx context.Context, link string) (types.TaskSt
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
 		s.log.Debug("Link verified with GET", "url", link, "statusCode", resp.StatusCode)
-		return types.TaskStatusCompleted, desc
+		return models.TaskStatusCompleted, desc
 	}
 
-	s.log.Warn("Link verification failed with GET", "url", link, "statusCode", resp.StatusCode)
-	return types.TaskStatusFailed, desc
+	s.log.Debug("Link verification failed with GET", "url", link, "statusCode", resp.StatusCode)
+	return models.TaskStatusFailed, desc
 }
 
 // shouldRetryWithGET determines if we should retry a failed HEAD request with GET
@@ -242,13 +242,12 @@ func (s *Analyzer) formatResponse(resp *http.Response) string {
 	return description
 }
 
-// publishSubTaskAdd publishes a subtask addition message
-func (s *Analyzer) publishSubTaskAdd(ctx context.Context, jobID string, taskType types.TaskType, key, url string) {
-	subTask := types.SubTask{
-		Type:        types.SubTaskTypeValidatingLink,
-		URL:         url,
-		Status:      types.TaskStatusPending,
-		Description: fmt.Sprintf("Link verification for %s", url),
+// publishSubTaskAdd publishes a subtask add event
+func (s *Analyzer) publishSubTaskAdd(ctx context.Context, jobID string, taskType models.TaskType, key, url string) {
+	subTask := models.SubTask{
+		Type:   models.SubTaskTypeValidatingLink,
+		Status: models.TaskStatusPending,
+		URL:    url,
 	}
 
 	if err := s.publisher.PublishSubTaskUpdate(ctx, messagebus.SubTaskUpdateMessage{
@@ -258,16 +257,12 @@ func (s *Analyzer) publishSubTaskAdd(ctx context.Context, jobID string, taskType
 		Key:      key,
 		SubTask:  subTask,
 	}); err != nil {
-		s.log.Error("Failed to publish subtask add",
-			"jobId", jobID,
-			"key", key,
-			"url", url,
-			"error", err)
+		s.log.Error("Failed to publish subtask add", "error", err)
 	}
 }
 
-// publishSubTaskUpdate publishes a subtask update message
-func (s *Analyzer) publishSubTaskUpdate(ctx context.Context, jobID string, taskType types.TaskType, key string, subtask types.SubTask) {
+// publishSubTaskUpdate publishes a subtask update event
+func (s *Analyzer) publishSubTaskUpdate(ctx context.Context, jobID string, taskType models.TaskType, key string, subtask models.SubTask) {
 	if err := s.publisher.PublishSubTaskUpdate(ctx, messagebus.SubTaskUpdateMessage{
 		Type:     messagebus.SubTaskUpdateMessageType,
 		JobID:    jobID,
@@ -275,10 +270,6 @@ func (s *Analyzer) publishSubTaskUpdate(ctx context.Context, jobID string, taskT
 		Key:      key,
 		SubTask:  subtask,
 	}); err != nil {
-		s.log.Error("Failed to publish subtask update",
-			"jobId", jobID,
-			"key", key,
-			"status", string(subtask.Status),
-			"error", err)
+		s.log.Error("Failed to publish subtask update", "error", err)
 	}
 }
