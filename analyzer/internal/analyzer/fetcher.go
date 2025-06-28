@@ -22,9 +22,7 @@ func (s *Analyzer) fetchContent(ctx context.Context, url string) (string, error)
 	}
 	defer resp.Body.Close()
 
-	if s.metrics != nil {
-		s.metrics.RecordHTTPClientRequest(resp.StatusCode, time.Since(start).Seconds(), req.Method, "content_fetch")
-	}
+	s.metrics.RecordHTTPClientRequest(resp.StatusCode, time.Since(start).Seconds(), req.Method, "content_fetch")
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

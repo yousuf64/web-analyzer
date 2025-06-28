@@ -20,9 +20,7 @@ func (s *Analyzer) verifyLinks(ctx context.Context, jobID string, result *Analys
 
 	defer func() {
 		s.updateTaskStatus(ctx, jobID, models.TaskTypeVerifyingLinks, models.TaskStatusCompleted)
-		if s.metrics != nil {
-			s.metrics.RecordAnalysisTask(string(models.TaskTypeVerifyingLinks), true, time.Since(start).Seconds())
-		}
+		s.metrics.RecordAnalysisTask(string(models.TaskTypeVerifyingLinks), true, time.Since(start).Seconds())
 	}()
 
 	count := len(result.links)
@@ -33,10 +31,8 @@ func (s *Analyzer) verifyLinks(ctx context.Context, jobID string, result *Analys
 	s.log.Info("Starting link verification", "linkCount", count)
 
 	// Track concurrent link verifications
-	if s.metrics != nil {
-		s.metrics.SetConcurrentLinkVerifications(count)
-		defer s.metrics.SetConcurrentLinkVerifications(0)
-	}
+	s.metrics.SetConcurrentLinkVerifications(count)
+	defer s.metrics.SetConcurrentLinkVerifications(0)
 
 	maxConcurrent := 10
 	if s.cfg != nil {
@@ -84,9 +80,7 @@ func (s *Analyzer) verifyLinks(ctx context.Context, jobID string, result *Analys
 				atomic.AddInt32(&result.inaccessibleLinks, 1)
 			}
 
-			if s.metrics != nil {
-				s.metrics.RecordLinkVerification(status == models.TaskStatusCompleted, d)
-			}
+			s.metrics.RecordLinkVerification(status == models.TaskStatusCompleted, d)
 
 		}(ctx, link, key)
 	}
@@ -136,16 +130,12 @@ func (s *Analyzer) tryHEADRequest(ctx context.Context, link string) (models.Task
 	if err != nil {
 		msg := s.formatRequestError(err)
 		s.log.Debug("HEAD request failed", "url", link, "error", err)
-		if s.metrics != nil {
-			s.metrics.RecordHTTPClientRequest(0, time.Since(start).Seconds(), http.MethodHead, "link_verification")
-		}
+		s.metrics.RecordHTTPClientRequest(0, time.Since(start).Seconds(), http.MethodHead, "link_verification")
 		return models.TaskStatusFailed, msg, false
 	}
 	defer resp.Body.Close()
 
-	if s.metrics != nil {
-		s.metrics.RecordHTTPClientRequest(resp.StatusCode, time.Since(start).Seconds(), http.MethodHead, "link_verification")
-	}
+	s.metrics.RecordHTTPClientRequest(resp.StatusCode, time.Since(start).Seconds(), http.MethodHead, "link_verification")
 
 	// Check if we should retry with GET
 	retry := s.shouldRetryWithGET(resp.StatusCode)
@@ -180,16 +170,12 @@ func (s *Analyzer) tryGETRequest(ctx context.Context, link string) (models.TaskS
 	if err != nil {
 		msg := s.formatRequestError(err)
 		s.log.Error("GET request failed", "url", link, "error", err)
-		if s.metrics != nil {
-			s.metrics.RecordHTTPClientRequest(0, time.Since(start).Seconds(), http.MethodGet, "link_verification")
-		}
+		s.metrics.RecordHTTPClientRequest(0, time.Since(start).Seconds(), http.MethodGet, "link_verification")
 		return models.TaskStatusFailed, msg
 	}
 	defer resp.Body.Close()
 
-	if s.metrics != nil {
-		s.metrics.RecordHTTPClientRequest(resp.StatusCode, time.Since(start).Seconds(), http.MethodGet, "link_verification")
-	}
+	s.metrics.RecordHTTPClientRequest(resp.StatusCode, time.Since(start).Seconds(), http.MethodGet, "link_verification")
 
 	desc := s.formatResponse(resp)
 

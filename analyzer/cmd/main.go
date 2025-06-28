@@ -69,7 +69,7 @@ func initializeDependencies(cfg *config.Config) (
 	*repository.TaskRepository,
 	*messagebus.MessageBus,
 	*http.Client,
-	*metrics.AnalyzerMetrics,
+	metrics.AnalyzerMetricsInterface,
 	func(),
 	error,
 ) {
@@ -88,12 +88,12 @@ func initializeDependencies(cfg *config.Config) (
 	}
 	repository.SeedTables(ddc, cfg.DynamoDB, m)
 
-	jobs, err := repository.NewJobRepository(cfg.DynamoDB, m)
+	jobs, err := repository.NewJobRepository(cfg.DynamoDB, repository.WithJobMetrics(m))
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, err
 	}
 
-	tasks, err := repository.NewTaskRepository(cfg.DynamoDB, m)
+	tasks, err := repository.NewTaskRepository(cfg.DynamoDB, repository.WithTaskMetrics(m))
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, err
 	}

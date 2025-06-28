@@ -14,26 +14,35 @@ import (
 
 const TasksTableName = "web-analyzer-tasks"
 
+// TaskOption is a function that configures the TaskRepository
+type TaskOption func(*TaskRepository)
+
+// WithTaskMetrics sets the metrics collector
+func WithTaskMetrics(mc MetricsCollector) TaskOption {
+	return func(t *TaskRepository) {
+		t.mc = mc
+	}
+}
+
+// TaskRepository is a struct for task repository
 type TaskRepository struct {
 	ddb *dynamodb.DynamoDB
 	mc  MetricsCollector
 }
 
-// NewTaskRepository creates a new TaskRepository with the given metrics collector
-func NewTaskRepository(cfg config.DynamoDBConfig, mc MetricsCollector) (*TaskRepository, error) {
+// NewTaskRepository creates a new task repository
+func NewTaskRepository(cfg config.DynamoDBConfig, opts ...TaskOption) (*TaskRepository, error) {
 	ddb, err := NewDynamoDBClient(cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	if mc == nil {
-		mc = NoOpMetricsCollector{}
+	repo := &TaskRepository{ddb: ddb, mc: NoOpMetricsCollector{}}
+	for _, opt := range opts {
+		opt(repo)
 	}
 
-	return &TaskRepository{
-		ddb: ddb,
-		mc:  mc,
-	}, nil
+	return repo, nil
 }
 
 // CreateTasks creates tasks

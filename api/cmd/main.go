@@ -110,12 +110,12 @@ func initializeDependencies(cfg *config.Config, logger *slog.Logger) (*dependenc
 	}
 
 	// Create repositories
-	jobRepo, err := repository.NewJobRepository(cfg.DynamoDB, m)
+	jobRepo, err := repository.NewJobRepository(cfg.DynamoDB, repository.WithJobMetrics(m))
 	if err != nil {
 		return nil, nil, err
 	}
 
-	taskRepo, err := repository.NewTaskRepository(cfg.DynamoDB, m)
+	taskRepo, err := repository.NewTaskRepository(cfg.DynamoDB, repository.WithTaskMetrics(m))
 	if err != nil {
 		return nil, nil, err
 	}

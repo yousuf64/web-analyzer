@@ -16,7 +16,7 @@ type Analyzer struct {
 	taskRepo  *repository.TaskRepository
 	publisher *messagebus.MessageBus
 	client    *http.Client
-	metrics   *metrics.AnalyzerMetrics
+	metrics   metrics.AnalyzerMetricsInterface
 	log       *slog.Logger
 	cfg       *config.Config
 }
@@ -46,7 +46,7 @@ func WithHTTPClient(client *http.Client) Option {
 }
 
 // WithMetrics sets the metrics collector
-func WithMetrics(metrics *metrics.AnalyzerMetrics) Option {
+func WithMetrics(metrics metrics.AnalyzerMetricsInterface) Option {
 	return func(s *Analyzer) {
 		s.metrics = metrics
 	}
@@ -78,6 +78,7 @@ func NewAnalyzer(
 		taskRepo:  taskRepo,
 		publisher: publisher,
 		client:    &http.Client{Timeout: 20 * time.Second},
+		metrics:   metrics.NewNoOpAnalyzerMetrics(),
 		log:       slog.Default(),
 	}
 

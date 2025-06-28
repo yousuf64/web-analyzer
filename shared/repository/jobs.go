@@ -16,25 +16,35 @@ import (
 
 const JobsTableName = "web-analyzer-jobs"
 
+// JobOption is a function that configures the JobRepository
+type JobOption func(*JobRepository)
+
+// WithJobMetrics sets the metrics collector
+func WithJobMetrics(mc MetricsCollector) JobOption {
+	return func(j *JobRepository) {
+		j.mc = mc
+	}
+}
+
+// JobRepository is a struct for job repository
 type JobRepository struct {
 	ddb *dynamodb.DynamoDB
 	mc  MetricsCollector
 }
 
-func NewJobRepository(cfg config.DynamoDBConfig, mc MetricsCollector) (*JobRepository, error) {
+// NewJobRepository creates a new job repository
+func NewJobRepository(cfg config.DynamoDBConfig, opts ...JobOption) (*JobRepository, error) {
 	ddb, err := NewDynamoDBClient(cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	if mc == nil {
-		mc = NoOpMetricsCollector{}
+	repo := &JobRepository{ddb: ddb, mc: NoOpMetricsCollector{}}
+	for _, opt := range opts {
+		opt(repo)
 	}
 
-	return &JobRepository{
-		ddb: ddb,
-		mc:  mc,
-	}, nil
+	return repo, nil
 }
 
 // CreateJob creates a new job

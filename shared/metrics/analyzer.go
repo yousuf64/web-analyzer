@@ -11,6 +11,7 @@ const (
 	analyzerServiceName = "analyzer"
 )
 
+// AnalyzerMetricsInterface is an interface for analyzer metrics
 type AnalyzerMetricsInterface interface {
 	MustRegisterAnalyzer()
 	RecordAnalysisJob(success bool, duration float64)
@@ -20,23 +21,25 @@ type AnalyzerMetricsInterface interface {
 	SetConcurrentLinkVerifications(count int)
 }
 
-type NoopAnalyzerMetrics struct{}
+// NoOpAnalyzerMetrics is a no-op implementation of AnalyzerMetricsInterface
+type NoOpAnalyzerMetrics struct{}
 
-func NewNoopAnalyzerMetrics() AnalyzerMetricsInterface {
-	return &NoopAnalyzerMetrics{}
+// NewNoOpAnalyzerMetrics creates a new no-op analyzer metrics
+func NewNoOpAnalyzerMetrics() AnalyzerMetricsInterface {
+	return &NoOpAnalyzerMetrics{}
 }
 
-func (n *NoopAnalyzerMetrics) MustRegisterAnalyzer()                       {}
-func (n *NoopAnalyzerMetrics) SetServiceInfo(version, goVersion string)    {}
-func (n *NoopAnalyzerMetrics) StartMetricsServer(port string) *http.Server { return nil }
-func (n *NoopAnalyzerMetrics) RecordAnalysisJob(success bool, duration float64) {
+func (n *NoOpAnalyzerMetrics) MustRegisterAnalyzer()                       {}
+func (n *NoOpAnalyzerMetrics) SetServiceInfo(version, goVersion string)    {}
+func (n *NoOpAnalyzerMetrics) StartMetricsServer(port string) *http.Server { return nil }
+func (n *NoOpAnalyzerMetrics) RecordAnalysisJob(success bool, duration float64) {
 }
-func (n *NoopAnalyzerMetrics) RecordAnalysisTask(taskType string, success bool, duration float64) {}
-func (n *NoopAnalyzerMetrics) RecordLinkVerification(success bool, duration float64) {
+func (n *NoOpAnalyzerMetrics) RecordAnalysisTask(taskType string, success bool, duration float64) {}
+func (n *NoOpAnalyzerMetrics) RecordLinkVerification(success bool, duration float64) {
 }
-func (n *NoopAnalyzerMetrics) RecordHTTPClientRequest(statusCode int, duration float64, method, requestType string) {
+func (n *NoOpAnalyzerMetrics) RecordHTTPClientRequest(statusCode int, duration float64, method, requestType string) {
 }
-func (n *NoopAnalyzerMetrics) SetConcurrentLinkVerifications(count int) {}
+func (n *NoOpAnalyzerMetrics) SetConcurrentLinkVerifications(count int) {}
 
 type AnalyzerMetrics struct {
 	*ServiceMetrics
@@ -54,6 +57,7 @@ type AnalyzerMetrics struct {
 	HTTPClientRequestDuration *prometheus.HistogramVec
 }
 
+// NewAnalyzerMetrics creates a new analyzer metrics
 func NewAnalyzerMetrics() *AnalyzerMetrics {
 	baseMetrics := NewServiceMetrics(analyzerServiceName)
 
@@ -148,6 +152,7 @@ func NewAnalyzerMetrics() *AnalyzerMetrics {
 	return analyzerMetrics
 }
 
+// MustRegisterAnalyzer registers the analyzer metrics and base service metrics
 func (m *AnalyzerMetrics) MustRegisterAnalyzer() {
 	m.ServiceMetrics.MustRegister()
 
@@ -164,6 +169,7 @@ func (m *AnalyzerMetrics) MustRegisterAnalyzer() {
 	)
 }
 
+// RecordAnalysisJob records the analysis job metrics
 func (m *AnalyzerMetrics) RecordAnalysisJob(success bool, duration float64) {
 	status := "success"
 	if !success {
@@ -174,6 +180,7 @@ func (m *AnalyzerMetrics) RecordAnalysisJob(success bool, duration float64) {
 	m.AnalysisDuration.WithLabelValues().Observe(duration)
 }
 
+// RecordAnalysisTask records the analysis task metrics
 func (m *AnalyzerMetrics) RecordAnalysisTask(taskType string, success bool, duration float64) {
 	status := "success"
 	if !success {
@@ -183,6 +190,7 @@ func (m *AnalyzerMetrics) RecordAnalysisTask(taskType string, success bool, dura
 	m.AnalysisTaskDuration.WithLabelValues(taskType).Observe(duration)
 }
 
+// RecordLinkVerification records the link verification metrics
 func (m *AnalyzerMetrics) RecordLinkVerification(success bool, duration float64) {
 	outcome := "success"
 	if !success {
@@ -193,11 +201,13 @@ func (m *AnalyzerMetrics) RecordLinkVerification(success bool, duration float64)
 	m.LinkVerificationDuration.WithLabelValues(outcome).Observe(duration)
 }
 
+// RecordHTTPClientRequest records the HTTP client request metrics
 func (m *AnalyzerMetrics) RecordHTTPClientRequest(status int, duration float64, method, requestType string) {
 	m.HTTPClientRequestsTotal.WithLabelValues(strconv.Itoa(status), method, requestType).Inc()
 	m.HTTPClientRequestDuration.WithLabelValues(method, requestType).Observe(duration)
 }
 
+// SetConcurrentLinkVerifications sets the concurrent link verifications metrics
 func (m *AnalyzerMetrics) SetConcurrentLinkVerifications(count int) {
 	m.ConcurrentLinkVerifications.Set(float64(count))
 }

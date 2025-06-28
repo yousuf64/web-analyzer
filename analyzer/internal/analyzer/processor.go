@@ -30,9 +30,7 @@ func (s *Analyzer) ProcessAnalyzeMessage(ctx context.Context, msg *nats.Msg) {
 		s.log.Error("Failed to process analyze request",
 			slog.String("jobId", am.JobId),
 			slog.Any("error", err))
-		if s.metrics != nil {
-			s.metrics.RecordAnalysisJob(false, time.Since(start).Seconds())
-		}
+		s.metrics.RecordAnalysisJob(false, time.Since(start).Seconds())
 		return
 	}
 
@@ -41,9 +39,7 @@ func (s *Analyzer) ProcessAnalyzeMessage(ctx context.Context, msg *nats.Msg) {
 		slog.String("jobId", am.JobId),
 		slog.Duration("processingTime", d))
 
-	if s.metrics != nil {
-		s.metrics.RecordAnalysisJob(true, d.Seconds())
-	}
+	s.metrics.RecordAnalysisJob(true, d.Seconds())
 }
 
 // analyzeURL performs the complete URL analysis workflow

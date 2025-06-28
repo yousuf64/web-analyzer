@@ -33,9 +33,7 @@ func (s *Analyzer) parseHTML(ctx context.Context, jobID, content string) (*html.
 	doc, err := html.Parse(strings.NewReader(content))
 
 	success := err == nil
-	if s.metrics != nil {
-		s.metrics.RecordAnalysisTask(string(models.TaskTypeExtracting), success, time.Since(start).Seconds())
-	}
+	s.metrics.RecordAnalysisTask(string(models.TaskTypeExtracting), success, time.Since(start).Seconds())
 
 	if err != nil {
 		s.updateTaskStatus(ctx, jobID, models.TaskTypeExtracting, models.TaskStatusFailed)
@@ -53,9 +51,7 @@ func (s *Analyzer) detectHTMLVersion(ctx context.Context, jobID, content string,
 
 	defer func() {
 		s.updateTaskStatus(ctx, jobID, models.TaskTypeIdentifyingVersion, models.TaskStatusCompleted)
-		if s.metrics != nil {
-			s.metrics.RecordAnalysisTask(string(models.TaskTypeIdentifyingVersion), true, time.Since(start).Seconds())
-		}
+		s.metrics.RecordAnalysisTask(string(models.TaskTypeIdentifyingVersion), true, time.Since(start).Seconds())
 	}()
 
 	content = strings.ToLower(content)
@@ -105,9 +101,7 @@ func (s *Analyzer) analyzeContent(ctx context.Context, jobID string, doc *html.N
 
 	defer func() {
 		s.updateTaskStatus(ctx, jobID, models.TaskTypeAnalyzing, models.TaskStatusCompleted)
-		if s.metrics != nil {
-			s.metrics.RecordAnalysisTask(string(models.TaskTypeAnalyzing), true, time.Since(start).Seconds())
-		}
+		s.metrics.RecordAnalysisTask(string(models.TaskTypeAnalyzing), true, time.Since(start).Seconds())
 	}()
 
 	s.traverseNode(doc, result)
