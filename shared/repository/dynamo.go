@@ -3,6 +3,7 @@ package repository
 import (
 	"log/slog"
 	"shared/config"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -86,6 +87,9 @@ func createJobsTableIfNotExists(client *dynamodb.DynamoDB, tableName string, mc 
 
 	_, err = client.CreateTable(input)
 	if err != nil {
+		if strings.Contains(err.Error(), "Cannot create preexisting table") {
+			return nil
+		}
 		return err
 	}
 
@@ -133,6 +137,9 @@ func createTasksTableIfNotExists(client *dynamodb.DynamoDB, tableName string, mc
 
 	_, err = client.CreateTable(input)
 	if err != nil {
+		if strings.Contains(err.Error(), "Cannot create preexisting table") {
+			return nil
+		}
 		return err
 	}
 
