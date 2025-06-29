@@ -17,7 +17,7 @@ function App() {
     const unsubscribeJob = webSocketService.subscribeToJobUpdates((jobId, status, result) => {
       setJobs(prevJobs => {
         const jobIndex = prevJobs.findIndex(job => job.id === jobId);
-        
+
         if (jobIndex === -1) {
           // If we get an update for a job we don't know about, fetch all jobs
           ApiService.getJobs()
@@ -68,11 +68,18 @@ function App() {
   }
 
   return (
-    <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4">Web Analyzer</h1>
-      
-      <div className="mb-8">
-        <UrlInput onJobCreated={handleJobCreated} />
+    <div className="container mx-auto px-20 py-14">
+      <div className="bg-gray-50 border border-gray-200 shadow-md rounded-md p-8 mb-8">
+        <div className="flex flex-col items-center justify-center mb-8">
+          <h1 className="text-4xl font-bold mb-2">go peek</h1>
+          <p className="text-sm text-gray-500 mb-4">
+            analyze and extract details from any website.
+          </p>
+        </div>
+
+        <div>
+          <UrlInput onJobCreated={handleJobCreated} />
+        </div>
       </div>
 
       {error && (

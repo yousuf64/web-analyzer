@@ -10,7 +10,7 @@ export function UrlInput({ onJobCreated }: UrlInputProps) {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
+  
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -39,14 +39,14 @@ export function UrlInput({ onJobCreated }: UrlInputProps) {
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="Enter URL to analyze"
-          className="flex-1 px-3 py-2 border"
+          className="flex-1 px-3 py-2 border rounded-md border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
           required
           disabled={loading}
         />
         <button
           type="submit"
           disabled={loading}
-          className="px-4 py-2 bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50"
+          className="px-4 py-2 bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 rounded-md cursor-pointer"
         >
           {loading ? 'Analyzing...' : 'Analyze'}
         </button>
