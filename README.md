@@ -17,6 +17,10 @@ Services communicate asynchronously via a **NATS message bus**, ensuring loose c
 
 ![Architecture](https://github.com/user-attachments/assets/4f820449-7f1d-4816-b5a6-e0f9adc67230)
 
+### User Interface(https://github.com/user-attachments/assets/60b43bed-2e20-4eb7-9130-0fc70f484de2)
+
+![UI]()
+
 ## Core Features
 
 - **Comprehensive Site Analysis**: Extracts HTML structure, headings, forms, and internal/external links.
