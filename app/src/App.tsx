@@ -4,6 +4,7 @@ import { UrlInput } from './components/UrlInput';
 import { JobCard } from './components/JobCard/JobCard';
 import type { Job, JobStatus } from './types';
 import { webSocketService } from './services/ws';
+import Logo from './components/Logo';
 
 const JobCardSkeleton = () => (
   <div className="bg-white shadow-md border border-gray-200 rounded-lg p-4">
@@ -74,62 +75,59 @@ function App() {
     setNewJobIds(prev => new Set([...prev, job.id]));
   };
 
-  if (error) {
-    return (
-      <div className="container mx-auto px-20 py-14">
-        <div className="bg-red-50 border border-red-200 rounded-md p-8 text-center">
-          <h2 className="text-2xl font-bold text-red-800 mb-2">Something went wrong</h2>
-          <p className="text-red-700">{error}</p>
-          <p className="text-sm text-red-600 mt-4">Please try refreshing the page. This could be due to the backend services not being available.</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="container mx-auto px-20 py-14">
-      <div className="bg-gray-50 border border-gray-200 shadow-md rounded-md p-8 mb-8">
-        <div className="flex flex-col items-center justify-center mb-8">
-          <h1 className="text-4xl font-bold mb-2">go peek</h1>
-          <p className="text-sm text-gray-500 mb-4">
-            analyze and extract details from any website.
-          </p>
+    <div className="min-h-screen bg-gray-50 text-gray-800">
+      <header className="sticky top-0 z-10 p-4 border-b border-gray-300 bg-gray-50/80 backdrop-blur-md">
+        <div className="container mx-auto flex justify-between items-center">
+          <Logo />
         </div>
+      </header>
 
-        <div>
+      <main className="container mx-auto p-4 md:p-8">
+        <div className="max-w-3xl mx-auto mb-12">
+          <h2 className="text-3xl font-bold text-center mb-2">
+            Analyze Any Website
+          </h2>
+          <p className="text-gray-600 text-center mb-8">
+            Enter a URL below to get a detailed analysis of its structure,
+            content, and more.
+          </p>
+
           <UrlInput onJobCreated={handleJobCreated} />
         </div>
-      </div>
 
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-6">
-          <p className="text-red-800">{error}</p>
-        </div>
-      )}
-      <div className="space-y-4">
-        {loading ? (
-          <>
-            <JobCardSkeleton />
-            <JobCardSkeleton />
-            <JobCardSkeleton />
-          </>
-        ) : (
-          <>
-            {jobs.map(job => (
-              <JobCard
-                key={job.id}
-                job={job}
-                isNew={newJobIds.has(job.id)}
-              />
-            ))}
-            {jobs.length === 0 && (
-              <div className="text-center py-10">
-                <p className="text-gray-500">No jobs yet. Add a URL to begin analyzing.</p>
+        <div className="max-w-3xl mx-auto">
+            {error && (
+              <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-6">
+                <p className="text-red-800">{error}</p>
               </div>
             )}
-          </>
-        )}
-      </div>
+            <div className="space-y-4">
+              {loading ? (
+                <>
+                  <JobCardSkeleton />
+                  <JobCardSkeleton />
+                  <JobCardSkeleton />
+                </>
+              ) : (
+                <>
+                  {jobs.map(job => (
+                    <JobCard
+                      key={job.id}
+                      job={job}
+                      isNew={newJobIds.has(job.id)}
+                    />
+                  ))}
+                  {jobs.length === 0 && (
+                    <div className="text-center py-10">
+                      <p className="text-gray-500">No jobs yet. Add a URL to begin analyzing.</p>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+      </main>
     </div>
   );
 }

@@ -39,7 +39,7 @@ export function UrlInput({ onJobCreated }: UrlInputProps) {
           type="text"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          placeholder="e.g., https://example.com"
+          placeholder="e.g., https://www.cncf.io/"
           className="flex-1 w-full px-4 py-2 text-gray-800 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-150 ease-in-out"
           required
           disabled={isSubmitting}

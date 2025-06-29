@@ -33,7 +33,9 @@ export function JobCard({ job, isNew = false }: JobCardProps) {
           <ProgressBar status={job.status} />
         </div>
         <div className="flex items-center space-x-4">
-          <StatusBadge status={job.status} />
+          <div className="w-24 flex justify-center">
+            <StatusBadge status={job.status} />
+          </div>
           <svg
             className={`w-6 h-6 text-gray-500 transform transition-transform duration-300 ${expanded ? 'rotate-180' : ''}`}
             fill="none"
