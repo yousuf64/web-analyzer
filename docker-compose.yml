@@ -1,47 +1,76 @@
+include:
+  - docker-compose.infra.yml
+
 services:
-  nats:
-    image: nats:latest
-    container_name: nats-server
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: web-analyzer-app
     ports:
-      - "4222:4222"  # Client connections
-      - "8222:8222"  # HTTP monitoring
-      - "6222:6222"  # Clustering
-    command: [
-      "--http_port", "8222",
-      "--port", "4222",
-      "--cluster_name", "web-analyzer-cluster"
-    ]
+      - "3000:80" # Expose the frontend at http://localhost:3000
+    restart: unless-stopped
+    networks:
+      - web-analyzer
+    depends_on:
+      - api
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: web-analyzer-api
+    ports:
+      - "8080:8080" # HTTP port
+      - "9090:9090" # Metrics port
+    environment:
+      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+      - NATS_URL=nats://nats:4222
+      - ZIPKIN_ENDPOINT=http://zipkin:9411/api/v2/spans
+    depends_on:
+      - dynamodb-local
+      - nats
+      - zipkin
+      - analyzer
     restart: unless-stopped
     networks:
       - web-analyzer
 
-  dynamodb-local:
-    image: amazon/dynamodb-local:latest
-    container_name: dynamodb-local
+  analyzer:
+    build:
+      context: .
+      dockerfile: analyzer/Dockerfile
+    container_name: web-analyzer-analyzer
     ports:
-      - "8000:8000"  # DynamoDB Local port
-    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-dbPath", "./data"]
-    volumes:
-      - "./docker/dynamodb:/home/dynamodblocal/data"
-    working_dir: /home/dynamodblocal
+      - "9091:9091" # Metrics port
+    environment:
+      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+      - NATS_URL=nats://nats:4222
+      - ZIPKIN_ENDPOINT=http://zipkin:9411/api/v2/spans
+    depends_on:
+      - dynamodb-local
+      - nats
+      - zipkin
     restart: unless-stopped
     networks:
       - web-analyzer
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/ || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
 
-  zipkin:
-    image: openzipkin/zipkin:latest
-    container_name: zipkin
+  notifications:
+    build:
+      context: .
+      dockerfile: notifications/Dockerfile
+    container_name: web-analyzer-notifications
     ports:
-      - "9411:9411"
+      - "8081:8081" # HTTP port
+      - "9092:9092" # Metrics port
+    environment:
+      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+      - NATS_URL=nats://nats:4222
+      - ZIPKIN_ENDPOINT=http://zipkin:9411/api/v2/spans
+    depends_on:
+      - dynamodb-local
+      - nats
+      - zipkin
     restart: unless-stopped
     networks:
       - web-analyzer
-      
-networks:
-  web-analyzer:
-    driver: bridge 
