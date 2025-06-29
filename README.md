@@ -15,62 +15,12 @@ Services communicate asynchronously via a **NATS message bus**, ensuring loose c
 
 ### Architecture Diagram
 
-```mermaid
-flowchart TB
-    subgraph "Frontend"
-        UI["React/TypeScript UI"]
-    end
-
-    subgraph "Backend Services"
-        API["API Service\n(Port 8080)"]
-        Analyzer["Analyzer Service"]
-        Notifications["Notification Backplane\n(Port 8081)"]
-    end
-
-    subgraph "Infrastructure"
-        NATS["NATS Message Bus\n(Port 4222)"]
-        DynamoDB["DynamoDB\n(Port 8000)"]
-        Metrics["Prometheus Metrics\n(Ports 9090-9092)"]
-        Tracing["Zipkin Tracing\n(Port 9411)"]
-    end
-
-    %% User flow
-    User((User)) -->|"1. Submit URL"| UI
-    UI -->|"2. POST /analyze"| API
-    API -->|"3. Store Job"| DynamoDB
-    API -->|"4. Publish analyze message"| NATS
-    NATS -->|"5. Consume analyze message"| Analyzer
-    Analyzer -->|"6. Process URL"| Internet((Internet))
-    Analyzer -->|"7. Update job status"| DynamoDB
-    Analyzer -->|"8. Publish updates"| NATS
-    NATS -->|"9. Consume updates"| Notifications
-    Notifications -->|"10. Send WebSocket updates"| UI
-    
-    %% Monitoring flows
-    API -.->|"Metrics"| Metrics
-    Analyzer -.->|"Metrics"| Metrics
-    Notifications -.->|"Metrics"| Metrics
-    API -.->|"Traces"| Tracing
-    Analyzer -.->|"Traces"| Tracing
-    Notifications -.->|"Traces"| Tracing
-
-    classDef primary fill:#4285F4,stroke:#333,stroke-width:1px,color:white;
-    classDef secondary fill:#34A853,stroke:#333,stroke-width:1px,color:white;
-    classDef infra fill:#FBBC05,stroke:#333,stroke-width:1px,color:black;
-    classDef external fill:#EA4335,stroke:#333,stroke-width:1px,color:white;
-    classDef user fill:#9C27B0,stroke:#333,stroke-width:1px,color:white;
-    
-    class API,Analyzer,Notifications secondary;
-    class UI primary;
-    class NATS,DynamoDB,Metrics,Tracing infra;
-    class Internet external;
-    class User user;
-```
+![Architecture](https://github.com/user-attachments/assets/4f820449-7f1d-4816-b5a6-e0f9adc67230)
 
 ## Core Features
 
 - **Comprehensive Site Analysis**: Extracts HTML structure, headings, forms, and internal/external links.
-- **In-Depth Link Verification**: Concurrently validates internal and external links, identifying broken links.
+- **In-Depth Link Verification**: Concurrently validates internal and external links, identifying broken links (Maximum concurrency is configurable).
 - **Real-Time Progress**: Delivers live updates on analysis progress directly to the UI via WebSockets.
 - **Scalable & Distributed**: Designed for horizontal scaling with stateless services and a message-driven workflow.
 - **Full Observability**: Integrated metrics, distributed tracing, and health checks for complete system monitoring.
@@ -79,11 +29,12 @@ flowchart TB
 
 | Category         | Technology / Library                                                                                                                              |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Backend (Go)** | [Go](https://golang.org/), [yousuf64/shift](https://github.com/yousuf64/shift) (fastest HTTP Router), [Gorilla WebSocket](https://github.com/gorilla/websocket), [AWS SDK for Go](https://aws.amazon.com/sdk-for-go), [ULID](https://github.com/oklog/ulid), [golang.org/x/net/html](https://pkg.go.dev/golang.org/x/net/html) |
+| **Backend** | [Go](https://golang.org/), [yousuf64/shift](https://github.com/yousuf64/shift) (the fastest HTTP Router), [Gorilla WebSocket](https://github.com/gorilla/websocket), [AWS SDK for Go](https://aws.amazon.com/sdk-for-go), [ULID](https://github.com/oklog/ulid), [golang.org/x/net/html](https://pkg.go.dev/golang.org/x/net/html) |
 | **Frontend**     | [React](https://reactjs.org/), [TypeScript](https://www.typescriptlang.org/), [Vite](https://vitejs.dev/), [Tailwind CSS](https://tailwindcss.com/)     |
 | **Database**     | [Amazon DynamoDB](https://aws.amazon.com/dynamodb/)                                                                                               |
 | **Messaging**    | [NATS](https://nats.io/)                                                                                                                          |
-| **Observability**| [Prometheus](https://prometheus.io/), [OpenTelemetry](https://opentelemetry.io/), [Zipkin](https://zipkin.io/)                                      |
+| **Testing**      | [GoMock](https://github.com/uber-go/mock), [Testify](https://github.com/stretchr/testify)                                                          |
+| **Observability**| [Prometheus](https://prometheus.io/), [OpenTelemetry](https://opentelemetry.io/), [Zipkin](https://zipkin.io/), [slog](https://pkg.go.dev/log/slog) (Structured Logging) |
 | **Containerization**| [Docker](https://www.docker.com/), [Docker Compose](https://docs.docker.com/compose/)                                                           |
 
 ## Getting Started
@@ -349,8 +300,9 @@ This project has a solid foundation, but there are several opportunities for fut
 - **Crawler Evasion Techniques**: Implement strategies to handle websites that block crawlers, such as user-agent rotation and support for proxy services.
 - **Granular Sub-Tasks for All Analyses**: Extend the real-time progress reporting to show sub-task updates for all analysis types, not just link verification.
 - **Performance & Accessibility Audits**: Incorporate tools like Google's Lighthouse to provide detailed reports on website performance, SEO best practices, and accessibility (WCAG) compliance.
-- **Dead-Letter Queues (DLQ)**: Utilize NATS's dead-letter queue functionality to handle messages that fail processing repeatedly, allowing for manual inspection and replay without blocking the main queue.
 - **User Authentication**: Implement user accounts to allow users to manage their own history of analysis jobs securely.
+- **Caching Layer**: Introduce a caching layer (e.g., Redis) to store the results of recent analyses. If a user requests an analysis for a URL that has been recently processed, the cached result can be served immediately, reducing redundant processing and providing a faster user experience.
+- **Notification Service Partitioning**: `notifications` service could struggle when having large number of active WebSocket connections. It could be enhanced to support partitioning, where multiple instances of the service handle distinct subsets of WebSocket connections, improving scalability and resilience.
 
 ## Development
 
