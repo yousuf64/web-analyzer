@@ -130,11 +130,11 @@ func (s *Analyzer) completeJob(ctx context.Context, job models.Job, result model
 
 // failAllTasks marks all tasks as failed
 func (s *Analyzer) failAllTasks(ctx context.Context, jobID string) {
+	s.updateTaskStatus(ctx, jobID, models.TaskTypeExtracting, models.TaskStatusFailed)
+	s.updateTaskStatus(ctx, jobID, models.TaskTypeIdentifyingVersion, models.TaskStatusFailed)
+	s.updateTaskStatus(ctx, jobID, models.TaskTypeAnalyzing, models.TaskStatusFailed)
+	s.updateTaskStatus(ctx, jobID, models.TaskTypeVerifyingLinks, models.TaskStatusFailed)
 	s.updateJobStatus(ctx, jobID, models.JobStatusFailed)
-	s.taskRepo.UpdateTaskStatus(ctx, jobID, models.TaskTypeExtracting, models.TaskStatusFailed)
-	s.taskRepo.UpdateTaskStatus(ctx, jobID, models.TaskTypeIdentifyingVersion, models.TaskStatusFailed)
-	s.taskRepo.UpdateTaskStatus(ctx, jobID, models.TaskTypeAnalyzing, models.TaskStatusFailed)
-	s.taskRepo.UpdateTaskStatus(ctx, jobID, models.TaskTypeVerifyingLinks, models.TaskStatusFailed)
 }
 
 // updateTaskStatus updates task status and publishes update

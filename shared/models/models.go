@@ -32,7 +32,7 @@ type Task struct {
 	JobID    string             `json:"job_id"`
 	Type     TaskType           `json:"type"`
 	Status   TaskStatus         `json:"status"`
-	SubTasks map[string]SubTask `json:"sub_tasks"`
+	SubTasks map[string]SubTask `json:"subtasks"`
 }
 
 // TaskType represents different types of analysis tasks

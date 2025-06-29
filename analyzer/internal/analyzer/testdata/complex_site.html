@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Complex E-commerce Site</title>
+</head>
+<body>
+    <header>
+        <h1>MegaStore</h1>
+        <nav>
+            <ul>
+                <li><a href="/home">Home</a></li>
+                <li><a href="/products">Products</a></li>
+                <li><a href="/cart">Cart</a></li>
+                <li><a href="/account">Account</a></li>
+                <li><a href="https://support.megastore.com">Support</a></li>
+                <li><a href="https://facebook.com/megastore">Facebook</a></li>
+                <li><a href="https://twitter.com/megastore/should_retry_and_fail">Twitter</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main>
+        <section>
+            <h2>Featured Products</h2>
+            <article>
+                <h3>Laptop Computer</h3>
+                <p>High-performance laptop for professionals.</p>
+                <a href="/products/laptop-123">View Details</a>
+            </article>
+            <article>
+                <h3>Smartphone</h3>
+                <p>Latest smartphone with advanced features.</p>
+                <a href="/products/phone-456">View Details</a>
+            </article>
+        </section>
+
+        <section>
+            <h2>Categories</h2>
+            <h3>Electronics</h3>
+            <ul>
+                <li><a href="/category/computers">Computers</a></li>
+                <li><a href="/category/phones">Phones</a></li>
+                <li><a href="/category/tablets">Tablets</a></li>
+            </ul>
+            
+            <h3>Accessories</h3>
+            <ul>
+                <li><a href="/category/cases">Cases</a></li>
+                <li><a href="/category/chargers">Chargers</a></li>
+            </ul>
+        </section>
+    </main>
+
+    <aside>
+        <h4>Customer Login</h4>
+        <form action="/login" method="post">
+            <label for="email">Email:</label>
+            <input type="email" id="email" name="email" required>
+            
+            <label for="password">Password:</label>
+            <input type="password" id="password" name="password" required>
+            
+            <button type="submit">Sign In</button>
+        </form>
+
+        <h4>Newsletter</h4>
+        <form action="/newsletter" method="post">
+            <label for="newsletter-email">Subscribe to newsletter:</label>
+            <input type="email" id="newsletter-email" name="newsletter-email">
+            <button type="submit">Subscribe</button>
+        </form>
+    </aside>
+
+    <footer>
+        <h5>Quick Links</h5>
+        <ul>
+            <li><a href="/about">About Us</a></li>
+            <li><a href="/contact">Contact</a></li>
+            <li><a href="/privacy">Privacy Policy</a></li>
+            <li><a href="/terms">Terms of Service</a></li>
+            <li><a href="/shipping">Shipping Info</a></li>
+            <li><a href="/returns/should_not_be_found">Returns</a></li>
+        </ul>
+        
+        <p>External partners:</p>
+        <ul>
+            <li><a href="https://paypal.com">PayPal</a></li>
+            <li><a href="https://stripe.com">Stripe</a></li>
+            <li><a href="https://ups.com">UPS Shipping</a></li>
+        </ul>
+    </footer>
+</body>
+</html> 

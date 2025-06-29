@@ -24,6 +24,10 @@ func (s *Analyzer) fetchContent(ctx context.Context, url string) (string, error)
 
 	s.metrics.RecordHTTPClientRequest(resp.StatusCode, time.Since(start).Seconds(), req.Method, "content_fetch")
 
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("failed to fetch content: %s", resp.Status)
+	}
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("failed to read response body: %w", err)

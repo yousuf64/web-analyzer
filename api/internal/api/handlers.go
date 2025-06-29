@@ -8,13 +8,14 @@ import (
 	"net/http"
 	"shared/messagebus"
 	"shared/models"
+	"strings"
 	"time"
 
 	"github.com/yousuf64/shift"
 )
 
 // handleAnalyze handles the analyze endpoint
-func (a *API) handleAnalyze(w http.ResponseWriter, r *http.Request, route shift.Route) error {
+func (a *API) handleAnalyze(w http.ResponseWriter, r *http.Request, _ shift.Route) error {
 	ctx := r.Context()
 	start := time.Now()
 
@@ -94,7 +95,7 @@ func (a *API) handleGetTasksByJobID(w http.ResponseWriter, r *http.Request, rout
 	ctx := r.Context()
 	jobID := route.Params.Get("job_id")
 
-	if jobID == "" {
+	if strings.TrimSpace(jobID) == "" {
 		return errors.New("job_id is required")
 	}
 

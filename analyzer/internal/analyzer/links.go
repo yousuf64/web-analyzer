@@ -44,7 +44,7 @@ func (s *Analyzer) verifyLinks(ctx context.Context, jobID string, result *Analys
 
 	for i, link := range result.links {
 		key := strconv.Itoa(i + 1)
-		s.publishSubTaskAdd(ctx, jobID, models.TaskTypeVerifyingLinks, key, link)
+		s.addSubTask(ctx, jobID, models.TaskTypeVerifyingLinks, key, link)
 
 		s.log.Debug("Added subtask for link verification", "key", key, "url", link)
 
@@ -57,7 +57,7 @@ func (s *Analyzer) verifyLinks(ctx context.Context, jobID string, result *Analys
 				<-sem
 			}()
 
-			s.publishSubTaskUpdate(ctx, jobID, models.TaskTypeVerifyingLinks, key, models.SubTask{
+			s.updateSubTask(ctx, jobID, models.TaskTypeVerifyingLinks, key, models.SubTask{
 				Type:   models.SubTaskTypeValidatingLink,
 				Status: models.TaskStatusRunning,
 				URL:    link,
@@ -67,7 +67,7 @@ func (s *Analyzer) verifyLinks(ctx context.Context, jobID string, result *Analys
 			status, desc := s.verifyLink(ctx, link)
 			d := time.Since(start).Seconds()
 
-			s.publishSubTaskUpdate(ctx, jobID, models.TaskTypeVerifyingLinks, key, models.SubTask{
+			s.updateSubTask(ctx, jobID, models.TaskTypeVerifyingLinks, key, models.SubTask{
 				Type:        models.SubTaskTypeValidatingLink,
 				Status:      status,
 				URL:         link,
@@ -228,12 +228,16 @@ func (s *Analyzer) formatResponse(resp *http.Response) string {
 	return description
 }
 
-// publishSubTaskAdd publishes a subtask add event
-func (s *Analyzer) publishSubTaskAdd(ctx context.Context, jobID string, taskType models.TaskType, key, url string) {
+// addSubTask adds a subtask and publishes an event
+func (s *Analyzer) addSubTask(ctx context.Context, jobID string, taskType models.TaskType, key, url string) {
 	subTask := models.SubTask{
 		Type:   models.SubTaskTypeValidatingLink,
 		Status: models.TaskStatusPending,
 		URL:    url,
+	}
+
+	if err := s.taskRepo.AddSubTaskByKey(ctx, jobID, taskType, key, subTask); err != nil {
+		s.log.Error("Failed to add subtask", "error", err)
 	}
 
 	if err := s.publisher.PublishSubTaskUpdate(ctx, messagebus.SubTaskUpdateMessage{
@@ -247,8 +251,12 @@ func (s *Analyzer) publishSubTaskAdd(ctx context.Context, jobID string, taskType
 	}
 }
 
-// publishSubTaskUpdate publishes a subtask update event
-func (s *Analyzer) publishSubTaskUpdate(ctx context.Context, jobID string, taskType models.TaskType, key string, subtask models.SubTask) {
+// updateSubTask updates a subtask and publishes an event
+func (s *Analyzer) updateSubTask(ctx context.Context, jobID string, taskType models.TaskType, key string, subtask models.SubTask) {
+	if err := s.taskRepo.UpdateSubTaskByKey(ctx, jobID, taskType, key, subtask); err != nil {
+		s.log.Error("Failed to update subtask", "error", err)
+	}
+
 	if err := s.publisher.PublishSubTaskUpdate(ctx, messagebus.SubTaskUpdateMessage{
 		Type:     messagebus.SubTaskUpdateMessageType,
 		JobID:    jobID,

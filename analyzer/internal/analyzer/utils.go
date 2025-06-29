@@ -80,44 +80,7 @@ func (s *Analyzer) isExternalURL(absoluteURL, baseURL string) bool {
 		return true
 	}
 
-	// Check if targetURL is a subdomain of baseURL or vice versa
-	return !s.isSubdomainOf(targetURL.Host, baseURLParsed.Host)
-}
-
-// isSubdomainOf checks if host1 is a subdomain of host2 or vice versa
-func (s *Analyzer) isSubdomainOf(host1, host2 string) bool {
-	// Remove ports for comparison
-	host1 = s.stripPort(host1)
-	host2 = s.stripPort(host2)
-
-	// Exact match
-	if host1 == host2 {
-		return true
-	}
-
-	// Check if one is a subdomain of the other
-	if strings.HasSuffix(host1, "."+host2) || strings.HasSuffix(host2, "."+host1) {
-		return true
-	}
-
-	return false
-}
-
-// stripPort removes port number from host if present
-func (s *Analyzer) stripPort(host string) string {
-	if colonIndex := strings.LastIndex(host, ":"); colonIndex != -1 {
-		// Check if this is actually a port (IPv6 addresses have colons too)
-		if portPart := host[colonIndex+1:]; portPart != "" {
-			// If it's all digits, it's likely a port
-			for _, r := range portPart {
-				if r < '0' || r > '9' {
-					return host // Not a port, return host
-				}
-			}
-			return host[:colonIndex] // Strip the port and return host
-		}
-	}
-	return host
+	return true
 }
 
 // shouldProcessLink determines if a link should be processed

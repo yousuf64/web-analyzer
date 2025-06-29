@@ -14,7 +14,17 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 )
 
+//go:generate mockgen -destination=../mocks/mock_jobs.go -package=mocks . JobRepositoryInterface
+
 const JobsTableName = "web-analyzer-jobs"
+
+type JobRepositoryInterface interface {
+	CreateJob(ctx context.Context, job *models.Job) error
+	GetJob(ctx context.Context, id string) (*models.Job, error)
+	GetAllJobs(ctx context.Context) ([]*models.Job, error)
+	UpdateJobStatus(ctx context.Context, id string, status models.JobStatus) error
+	UpdateJob(ctx context.Context, id string, status *models.JobStatus, result *models.AnalyzeResult) error
+}
 
 // JobOption is a function that configures the JobRepository
 type JobOption func(*JobRepository)

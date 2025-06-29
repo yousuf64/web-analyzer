@@ -14,6 +14,16 @@ import (
 
 const TasksTableName = "web-analyzer-tasks"
 
+//go:generate mockgen -destination=../mocks/mock_tasks.go -package=mocks . TaskRepositoryInterface
+
+type TaskRepositoryInterface interface {
+	CreateTasks(ctx context.Context, tasks ...*models.Task) error
+	UpdateTaskStatus(ctx context.Context, jobId string, taskType models.TaskType, status models.TaskStatus) error
+	GetTasksByJobId(ctx context.Context, jobId string) ([]models.Task, error)
+	AddSubTaskByKey(ctx context.Context, jobId string, taskType models.TaskType, key string, subtask models.SubTask) error
+	UpdateSubTaskByKey(ctx context.Context, jobId string, taskType models.TaskType, key string, subtask models.SubTask) error
+}
+
 // TaskOption is a function that configures the TaskRepository
 type TaskOption func(*TaskRepository)
 
@@ -65,6 +75,13 @@ func (t *TaskRepository) CreateTasks(ctx context.Context, tasks ...*models.Task)
 		item, err := dynamodbattribute.MarshalMap(entity)
 		if err != nil {
 			return err
+		}
+
+		if len(task.SubTasks) == 0 {
+			// Initialize subtasks as empty map
+			item["subtasks"] = &dynamodb.AttributeValue{
+				M: map[string]*dynamodb.AttributeValue{},
+			}
 		}
 
 		writeRequests = append(writeRequests, &dynamodb.WriteRequest{
@@ -171,7 +188,7 @@ func (t *TaskRepository) AddSubTaskByKey(ctx context.Context, jobId string, task
 	entity := &SubTaskEntity{}
 	entity.FromModel(&subtask)
 
-	subtaskAttr, err := dynamodbattribute.Marshal(entity)
+	subtaskMap, err := dynamodbattribute.MarshalMap(entity)
 	if err != nil {
 		return err
 	}
@@ -186,12 +203,15 @@ func (t *TaskRepository) AddSubTaskByKey(ctx context.Context, jobId string, task
 				S: aws.String(string(taskType)),
 			},
 		},
-		UpdateExpression: aws.String("SET subtasks.#key = :subtask"),
+		UpdateExpression: aws.String("SET #subtasks.#key = :subtask"),
 		ExpressionAttributeNames: map[string]*string{
-			"#key": aws.String(key),
+			"#subtasks": aws.String("subtasks"),
+			"#key":      aws.String(key),
 		},
 		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-			":subtask": subtaskAttr,
+			":subtask": {
+				M: subtaskMap,
+			},
 		},
 	}
 
@@ -213,7 +233,7 @@ func (t *TaskRepository) UpdateSubTaskByKey(ctx context.Context, jobId string, t
 	entity := &SubTaskEntity{}
 	entity.FromModel(&subtask)
 
-	subtaskAttr, err := dynamodbattribute.Marshal(entity)
+	subtaskMap, err := dynamodbattribute.MarshalMap(entity)
 	if err != nil {
 		return err
 	}
@@ -233,7 +253,9 @@ func (t *TaskRepository) UpdateSubTaskByKey(ctx context.Context, jobId string, t
 			"#key": aws.String(key),
 		},
 		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-			":subtask": subtaskAttr,
+			":subtask": {
+				M: subtaskMap,
+			},
 		},
 	}
 

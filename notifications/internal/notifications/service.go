@@ -13,7 +13,7 @@ import (
 // NotificationService handles WebSocket notifications and NATS message subscriptions
 type NotificationService struct {
 	hub  *Hub
-	mb   *messagebus.MessageBus
+	mb   messagebus.MessageBusInterface
 	cfg  *config.Config
 	log  *slog.Logger
 	subs []*nats.Subscription
@@ -25,7 +25,7 @@ type Option func(*NotificationService)
 // NewNotificationService creates a new notification service with WebSocket hub and message bus
 func NewNotificationService(
 	hub *Hub,
-	mb *messagebus.MessageBus,
+	mb messagebus.MessageBusInterface,
 	opts ...Option,
 ) *NotificationService {
 	s := &NotificationService{

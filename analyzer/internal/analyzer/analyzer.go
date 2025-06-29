@@ -12,9 +12,9 @@ import (
 
 // Analyzer handles HTML analysis with all dependencies consolidated
 type Analyzer struct {
-	jobRepo   *repository.JobRepository
-	taskRepo  *repository.TaskRepository
-	publisher *messagebus.MessageBus
+	jobRepo   repository.JobRepositoryInterface
+	taskRepo  repository.TaskRepositoryInterface
+	publisher messagebus.MessageBusInterface
 	client    *http.Client
 	metrics   metrics.AnalyzerMetricsInterface
 	log       *slog.Logger
@@ -68,9 +68,9 @@ func WithConfig(cfg *config.Config) Option {
 
 // NewAnalyzer creates a new analyzer with required dependencies and optional configurations
 func NewAnalyzer(
-	jobRepo *repository.JobRepository,
-	taskRepo *repository.TaskRepository,
-	publisher *messagebus.MessageBus,
+	jobRepo repository.JobRepositoryInterface,
+	taskRepo repository.TaskRepositoryInterface,
+	publisher messagebus.MessageBusInterface,
 	opts ...Option,
 ) *Analyzer {
 	s := &Analyzer{

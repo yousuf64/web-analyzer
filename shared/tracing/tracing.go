@@ -16,7 +16,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-var tracer trace.Tracer
+var tracer = sdktrace.NewTracerProvider().Tracer("no-op")
 
 func GetTracer() trace.Tracer {
 	return tracer

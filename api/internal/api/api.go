@@ -19,9 +19,9 @@ import (
 
 // API handles the HTTP server and routes
 type API struct {
-	jobRepo  *repository.JobRepository
-	taskRepo *repository.TaskRepository
-	mb       *messagebus.MessageBus
+	jobRepo  repository.JobRepositoryInterface
+	taskRepo repository.TaskRepositoryInterface
+	mb       messagebus.MessageBusInterface
 	metrics  *metrics.APIMetrics
 	log      *slog.Logger
 	srv      *http.Server
