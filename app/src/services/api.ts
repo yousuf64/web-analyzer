@@ -15,6 +15,9 @@ export class ApiService {
     });
 
     if (!response.ok) {
+      if (response.status === 400) {
+        throw new Error(await response.text());
+      }
       throw new Error(`Failed to create analyze job: ${response.statusText}`);
     }
 

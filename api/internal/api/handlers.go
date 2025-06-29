@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"shared/messagebus"
@@ -34,7 +33,8 @@ func (a *API) handleAnalyze(w http.ResponseWriter, r *http.Request, _ shift.Rout
 	// Validate and normalize the URL
 	validatedURL, err := validateURL(req.URL)
 	if err != nil {
-		return fmt.Errorf("url validation failed: %w", err)
+		http.Error(w, "Invalid URL, please check the URL and try again.", http.StatusBadRequest)
+		return nil
 	}
 
 	jobID := generateID()
