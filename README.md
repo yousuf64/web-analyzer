@@ -341,6 +341,17 @@ Each Go service exposes Prometheus-compatible metrics and a health check endpoin
 
 Distributed traces can be viewed in the Zipkin UI at `http://localhost:9411`.
 
+## Future Improvements
+
+This project has a solid foundation, but there are several opportunities for future enhancements:
+
+- **Single-Page Application (SPA) Analysis**: Enhance the `analyzer` to use a headless browser to fully render JavaScript-heavy SPAs, allowing for analysis of the final DOM state rather than just the initial HTML payload.
+- **Crawler Evasion Techniques**: Implement strategies to handle websites that block crawlers, such as user-agent rotation and support for proxy services.
+- **Granular Sub-Tasks for All Analyses**: Extend the real-time progress reporting to show sub-task updates for all analysis types, not just link verification.
+- **Performance & Accessibility Audits**: Incorporate tools like Google's Lighthouse to provide detailed reports on website performance, SEO best practices, and accessibility (WCAG) compliance.
+- **Dead-Letter Queues (DLQ)**: Utilize NATS's dead-letter queue functionality to handle messages that fail processing repeatedly, allowing for manual inspection and replay without blocking the main queue.
+- **User Authentication**: Implement user accounts to allow users to manage their own history of analysis jobs securely.
+
 ## Development
 
 ### Prerequisites
