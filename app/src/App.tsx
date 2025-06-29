@@ -1,9 +1,24 @@
 import { useState, useEffect } from 'react';
 import { ApiService } from './services/api';
 import { UrlInput } from './components/UrlInput';
-import { JobCard } from './components/JobCard';
+import { JobCard } from './components/JobCard/JobCard';
 import type { Job, JobStatus } from './types';
 import { webSocketService } from './services/ws';
+
+const JobCardSkeleton = () => (
+  <div className="bg-white shadow-md border border-gray-200 rounded-lg p-4">
+    <div className="flex justify-between items-center animate-pulse">
+      <div className="flex-grow pr-4">
+        <div className="h-4 bg-gray-300 rounded w-3/4 mb-3"></div>
+        <div className="h-1.5 bg-gray-300 rounded w-full"></div>
+      </div>
+      <div className="flex items-center space-x-4">
+        <div className="h-5 bg-gray-300 rounded-full w-20"></div>
+        <div className="w-6 h-6 bg-gray-300 rounded-full"></div>
+      </div>
+    </div>
+  </div>
+);
 
 function App() {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -59,12 +74,16 @@ function App() {
     setNewJobIds(prev => new Set([...prev, job.id]));
   };
 
-  if (loading) {
-    return <div>Loading jobs...</div>;
-  }
-
   if (error) {
-    return <div>Error: {error}</div>;
+    return (
+      <div className="container mx-auto px-20 py-14">
+        <div className="bg-red-50 border border-red-200 rounded-md p-8 text-center">
+          <h2 className="text-2xl font-bold text-red-800 mb-2">Something went wrong</h2>
+          <p className="text-red-700">{error}</p>
+          <p className="text-sm text-red-600 mt-4">Please try refreshing the page. This could be due to the backend services not being available.</p>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -88,15 +107,27 @@ function App() {
         </div>
       )}
       <div className="space-y-4">
-        {jobs.map(job => (
-          <JobCard
-            key={job.id}
-            job={job}
-            isNew={newJobIds.has(job.id)}
-          />
-        ))}
-        {jobs.length === 0 && (
-          <div>No jobs yet. Add a URL to analyze.</div>
+        {loading ? (
+          <>
+            <JobCardSkeleton />
+            <JobCardSkeleton />
+            <JobCardSkeleton />
+          </>
+        ) : (
+          <>
+            {jobs.map(job => (
+              <JobCard
+                key={job.id}
+                job={job}
+                isNew={newJobIds.has(job.id)}
+              />
+            ))}
+            {jobs.length === 0 && (
+              <div className="text-center py-10">
+                <p className="text-gray-500">No jobs yet. Add a URL to begin analyzing.</p>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
