@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Documentation - MyService</title>
+</head>
+<body>
+
+    <header>
+        <nav>
+            <ul>
+                <li><a href="/">Home</a></li>
+                <li><a href="/guides">Guides</a></li>
+                <li><a href="/api-reference">API Reference</a></li>
+                <li><a href="https://status.myservice.com">Status</a></li>
+            </ul>
+        </nav>
+        <form action="/search" method="get" id="search-form">
+            <label for="search-input">Search Docs</label>
+            <input type="search" id="search-input" name="q" placeholder="Search docs...">
+            <button type="submit">Search</button>
+        </form>
+    </header>
+
+    <main>
+        <article>
+            <h1>MyService API Documentation</h1>
+            <p>Welcome to the official documentation for MyService API. Here you will find all the information you need to integrate with our services.</p>
+
+            <section id="authentication">
+                <h2>Authentication</h2>
+                <p>To use the MyService API, you need an API key. You can get one from your <a href="/dashboard/settings">dashboard</a>.</p>
+                <p>All API requests must be made over <a href="https://en.wikipedia.org/wiki/HTTPS" target="_blank">HTTPS</a>. Calls made over plain HTTP will fail. API requests without authentication will also fail.</p>
+                <pre><code>
+curl -X GET "https://api.myservice.com/v1/users" \
+-H "Authorization: Bearer YOUR_API_KEY"
+                </code></pre>
+            </section>
+
+            <section id="endpoints">
+                <h2>Core Endpoints</h2>
+                
+                <h3>GET /users</h3>
+                <p>Retrieves a list of users. Supports pagination.</p>
+                
+                <h3>POST /users</h3>
+                <p>Creates a new user.</p>
+
+                <h3>GET /users/{id}</h3>
+                <p>Retrieves a specific user by their ID.</p>
+            </section>
+
+            <section id="error-handling">
+                <h2>Error Handling</h2>
+                <p>MyService API uses conventional HTTP response codes to indicate the success or failure of an API request. For more details, see the <a href="#error-codes">error codes section</a>.</p>
+            </section>
+
+            <section id="rate-limiting">
+                <h2>Rate Limiting</h2>
+                <p>We enforce rate limits to ensure fair usage. See our <a href="/docs/rate-limiting">rate limiting guide</a> for more information.</p>
+            </section>
+        </article>
+
+        <aside>
+            <h3>Quick Navigation</h3>
+            <ul>
+                <li><a href="#authentication">Authentication</a></li>
+                <li><a href="#endpoints">Core Endpoints</a></li>
+                <li><a href="#error-handling">Error Handling</a></li>
+                <li><a href="#rate-limiting">Rate Limiting</a></li>
+                <li><a href="mailto:support@myservice.com">Contact Support</a></li>
+                <li><a href="tel:+123456789">Call Us</a></li>
+                <li><a href="https://github.com/my-service" target="_blank" aria-label="Our GitHub"></a></li>
+                <li><a target="_blank" href="https://twitter.com/my-service">Our Twitter</a></li>
+                <li><a href=""></a></li>
+                <li><a href="/should_not_be_found/page">Broken Page</a></li>
+                <li><a href="https://external.com/should_retry_and_fail">Failing External Link</a></li>
+            </ul>
+        </aside>
+
+    </main>
+
+    <footer id="error-codes">
+        <h2>Error Codes</h2>
+        <p>&copy; 2024 MyService. All rights reserved. <a href="/privacy">Privacy Policy</a></p>
+    </footer>
+
+</body>
+</html> 

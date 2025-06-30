@@ -230,6 +230,24 @@ func TestAnalyzer_HTMLAnalysis(t *testing.T) {
 			expectedLoginForm:    false,
 			description:          "Old HTML 4.01 page with table layout and basic form - testing legacy HTML detection",
 		},
+		{
+			name:                "APIDocumentation",
+			htmlFile:            "testdata/api_docs.html",
+			testURL:             "https://docs.myservice.com",
+			expectedTitle:       "API Documentation - MyService",
+			expectedHTMLVersion: "HTML5",
+			expectedHeadings: map[string]int{
+				"h1": 1,
+				"h2": 5,
+				"h3": 4,
+			},
+			expectedExternal:     5, // status.myservice.com, en.wikipedia.org/wiki/HTTPS, github.com/my-service, twitter.com/my-service, external.com/should_retry_and_fail
+			expectedInternal:     6, // /guides, /api-reference, /dashboard/settings, /docs/rate-limiting, /should_not_be_found/page, /privacy
+			expectedAccessible:   9,
+			expectedInaccessible: 2,
+			expectedLoginForm:    false,
+			description:          "API documentation page with modern HTML, mixed link types, and a non-login form",
+		},
 	}
 
 	for _, tc := range testCases {

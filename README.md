@@ -17,10 +17,6 @@ Services communicate asynchronously via a **NATS message bus**, ensuring loose c
 
 ![Architecture](https://github.com/user-attachments/assets/4f820449-7f1d-4816-b5a6-e0f9adc67230)
 
-### User Interface(https://github.com/user-attachments/assets/60b43bed-2e20-4eb7-9130-0fc70f484de2)
-
-![UI]()
-
 ## Core Features
 
 - **Comprehensive Site Analysis**: Extracts HTML structure, headings, forms, and internal/external links.
@@ -322,3 +318,17 @@ go test ./...
 ```
 ### Configuration
 All services use environment variables with sensible defaults for local development. 
+
+### User Interface
+
+#### Completed Analysis Jobs
+
+https://github.com/user-attachments/assets/16cd4b8d-fdd9-450f-927e-35e325b5dd21
+
+#### Analyze https://www.cncf.io/
+
+https://github.com/user-attachments/assets/85848670-3681-41be-8012-ee136286c3dc
+
+#### Distributed Tracing (OpenTelemetry + Zipkin)
+
+https://github.com/user-attachments/assets/025c4e74-0a1c-4b14-b239-a721688402cf
